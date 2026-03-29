@@ -1,0 +1,66 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef enum {
+    MMAP_FREE = 0,
+    MMAP_RESERVED,
+    MMAP_ACPI_RECLAIMABLE,
+    MMAP_ACPI_NVS,
+    MMAP_BAD_MEMORY,
+    MMAP_BOOTLOADER_RECLAIM,
+    MMAP_KERNEL_AND_MODULES,
+    MMAP_FRAMEBUFFER
+} MemoryType;
+
+typedef struct {
+    uint64_t base;
+    uint64_t length;
+    uint32_t type;
+} MemoryRegion;
+
+typedef struct {
+    void* fb_addr;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t bpp;
+} FramebufferInfo;
+
+typedef struct {
+    uint32_t logic_id;
+    uint32_t hw_id;        // x86_64: Local APIC ID / AArch64: MPIDR
+    void* boot_stack_ptr;
+    void* extra_info;      // reserved
+} CoreInfo;
+
+typedef struct {
+    /* Memory */
+    MemoryRegion* mmap;
+    uint64_t      mmap_entries;
+    uint64_t      hhdm_offset;
+
+    /* Graphics */
+    FramebufferInfo fb;
+
+    /* Kernel Binary */
+    struct {
+        uintptr_t phys_base;
+        uintptr_t virt_base;
+        void* file_ptr;          // Binery Address
+        uint64_t  file_size;     // Binery Size
+    } kernel;
+
+    /* Multi-Processor */
+    struct {
+        uint32_t  total_cores;
+        CoreInfo* cores;
+        uint32_t  bsp_hw_id;
+    } smp;
+
+    /* System Tables */
+    uintptr_t rsdp_address;
+} BootInfo;
+
+extern BootInfo g_boot_info;

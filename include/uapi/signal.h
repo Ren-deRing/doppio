@@ -21,3 +21,9 @@
 #define SIGCONT     18  /* Resume a stopped process */
 #define SIGSTOP     19  /* Pause */
 #define SIGTSTP     20  /* Terminal stop request */
+
+#define SIGWINCH    28  /* Window resize */
+#define SIGIO       29  /* I/O now possible */
+#define SIGPWR      30  /* Power failure */
+#define SIGSYS      31  /* Bad system call */
+#define NSIG        32  /* Signal Count */

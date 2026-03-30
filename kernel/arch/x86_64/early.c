@@ -42,5 +42,4 @@ void early_init(void) {
     bsp_init();
 }
 
-void do_nothing(void) {}   // TODO
-arch_initcall(do_nothing); // why???? if remove: boom fuck please don't touch until i patch.
+/* Fixed: do_nothing's former kingdom... RIP 2026-2026 */

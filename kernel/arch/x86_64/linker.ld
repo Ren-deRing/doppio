@@ -23,9 +23,10 @@ SECTIONS
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .initcall : {
-        . = ALIGN(8);
         __initcall_start = .;
+        QUAD(0);
         KEEP(*(SORT_BY_NAME(.initcall.*)))
+        QUAD(0)
         __initcall_end = .;
     } :rodata
 

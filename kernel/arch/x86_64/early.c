@@ -3,24 +3,12 @@
 
 #include "boot/bootinfo.h"
 
-#include "init.h"
+#include "kernel/cpu.h"
+#include "kernel/init.h"
 
-extern Elf64_Rela __rela_start[];
-extern Elf64_Rela __rela_end[];
+static struct cpu cpus[MAX_CPUS];
+
 extern uint8_t __kernel_start[];
-
-void do_rela() {
-    uintptr_t delta = g_boot_info.kernel.virt_base - (uintptr_t)__kernel_start;
-
-    if (delta == 0) return;
-
-    for (Elf64_Rela *rela = __rela_start; rela < __rela_end; rela++) {
-        if (ELF64_R_TYPE(rela->r_info) == R_X86_64_RELATIVE) {
-            uintptr_t *addr = (uintptr_t *)(rela->r_offset + delta);
-            *addr = (uintptr_t)(rela->r_addend + delta);
-        }
-    }
-}
 
 void fpu_init(void) {
     uintptr_t cr0, cr4;
@@ -39,5 +27,20 @@ void fpu_init(void) {
     asm volatile ("fninit");
 }
 
-early_initcall(do_rela);
-early_initcall(fpu_init);
+void bsp_init(void) {
+    int id = 0; 
+    struct cpu *c = &cpus[id];
+
+    c->self = c;
+    c->id = id;
+
+    // TODO
+}
+
+void early_init(void) {
+    fpu_init();
+    bsp_init();
+}
+
+void do_nothing(void) {}   // TODO
+arch_initcall(do_nothing); // why???? if remove: boom fuck please don't touch until i patch.

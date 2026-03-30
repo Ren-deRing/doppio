@@ -4,11 +4,11 @@ B_OBJS := $(patsubst ./%, $(OBJ_DIR)/boot/%, $(B_SRCS))
 B_OBJS := $(B_OBJS:.c=.o)
 B_OBJS := $(B_OBJS:.S=.o)
 
-B_CFLAGS := $(CFLAGS) -mcmodel=kernel -mno-red-zone \
+B_CFLAGS := $(CFLAGS) -mcmodel=kernel -mno-red-zone -mno-sse \
              -I. \
              -I$(BASE_DIR) \
              -I$(BASE_DIR)/lib \
-             -I$(BASE_DIR)/kernel/include \
+             -I$(BASE_DIR)/include \
              -I$(BASE_DIR)/libc/include
 
 .PHONY: all clean

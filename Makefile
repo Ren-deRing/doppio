@@ -14,7 +14,7 @@ LIMINE_DIR := $(BASE_DIR)/limine
 SUBDIRS := lib libc util kernel base modules boot
 
 ifeq ($(ARCH), x86_64)
-    ARCH_CFLAGS  := -m64 -march=x86-64 -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+    ARCH_CFLAGS  := -m64 -march=x86-64 -mno-red-zone
     ARCH_LDFLAGS := -m elf_x86_64
     LIMINE_EFI   := $(LIMINE_DIR)/BOOTX64.EFI
 else ifeq ($(ARCH), aarch64)
@@ -27,17 +27,19 @@ export CC      := clang -target $(ARCH)-unknown-none-elf
 export LD      := ld.lld
 export AS      := nasm 
 
-export CFLAGS  := -g -O2 -ffreestanding -fno-stack-protector -fPIC \
+export CFLAGS  := -g -O2 -ffreestanding -fno-stack-protector \
+				  -fno-PIC -fno-PIE \
                   $(ARCH_CFLAGS) \
                   -ffunction-sections -fdata-sections -Wall -Wextra
 
 export CPPFLAGS := -I$(BASE_DIR) \
-                   -I$(BASE_DIR)/kernel/include \
                    -I$(BASE_DIR)/libc/include \
+				   -I$(BASE_DIR)/include \
                    -D__$(ARCH)__
 
 export LDFLAGS  := $(ARCH_LDFLAGS) -nostdlib -static --gc-sections \
-                   -T $(BASE_DIR)/linker/$(ARCH).lds
+				   -no-pie -z max-page-size=0x1000 \
+                   -T $(BASE_DIR)/kernel/arch/$(ARCH)/linker.ld
 
 .PHONY: all clean $(SUBDIRS) run limine_setup
 
@@ -85,7 +87,7 @@ run: iso
 	qemu-system-x86_64 \
 		-cdrom $(ISO_IMAGE) \
 		-m 512M \
-		-serial stdio
+		-serial stdio -d int -no-reboot
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

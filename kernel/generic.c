@@ -1,18 +1,18 @@
 #include "boot/bootinfo.h"
-#include "init.h"
-
-extern initcall_t __initcall_start;
-extern initcall_t __initcall_end;
+#include "kernel/init.h"
+#include "kernel/cpu.h"
 
 void do_initcalls(void) {
-    for (initcall_t* call = &__initcall_start; call < &__initcall_end; call++) {
-        if (*call) {
-            (*call)();
-        }
+    for (initcall_t* call = __initcall_start; call < __initcall_end; call++) {
+        if (!call || !*call) continue;
+        
+        (*call)();
     }
 }
 
 void generic_entry() {
+    early_init();
+
     do_initcalls();
 
     uint32_t* fb_ptr = (uint32_t*)g_boot_info.fb.fb_addr;
@@ -28,12 +28,13 @@ void generic_entry() {
         }
     }
 
-    // 중앙에 작은 사각형 하나 그려서 "나 살아있음" 표시
     for (uint32_t y = height/2 - 50; y < height/2 + 50; y++) {
         for (uint32_t x = width/2 - 50; x < width/2 + 50; x++) {
             fb_ptr[y * pixels_per_line + x] = 0xFFFFFF; // 흰색 점
         }
     }
 
-    for (;;);
+    asm volatile("int $0");
+
+    for (;;) arch_halt();
 }

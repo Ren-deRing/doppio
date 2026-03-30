@@ -22,31 +22,18 @@ SECTIONS
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
+    .initcall : {
+        . = ALIGN(8);
+        __initcall_start = .;
+        KEEP(*(SORT_BY_NAME(.initcall.*)))
+        __initcall_end = .;
+    } :rodata
+
     .rodata : {
         __rodata_start = .;
         *(.rodata .rodata.*)
-
-        /* Initcall */
-        . = ALIGN(8);
-        __initcall_start = .;
-        KEEP(*(.initcall.0*)) /* Early */
-        KEEP(*(.initcall.1*)) /* L0: Arch 초기화 */
-        KEEP(*(.initcall.2*)) /* L1: Memory 초기화 */
-        KEEP(*(.initcall.3*)) /* L2: Bus/Driver 초기화 */
-        KEEP(*(.initcall.4*)) /* L3: Subsytem 초기화 */
-        KEEP(*(.initcall.5*)) /* L4: Userland 준비 */
-        __initcall_end = .;
-
         __rodata_end = .;
     } :rodata
-
-    .rela.dyn : {
-        __rela_start = .;
-        *(.rela.dyn)
-        *(.rela.*)
-        __rela_end = .;
-    } :rodata
-
     .note.gnu.build-id : {
         *(.note.gnu.build-id)
     } :rodata

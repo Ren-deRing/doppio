@@ -1,7 +1,8 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "init.h"
+#include "kernel/init.h"
+#include "kernel/cpu.h"
 
 typedef struct tss_entry {
 	uint32_t reserved_0;
@@ -40,7 +41,7 @@ typedef struct {
     uint8_t df_stack[4096] __attribute__((aligned(16)));
 } __attribute__((packed)) __attribute__((aligned(0x10))) GDT;
 
-GDT gdt[32];
+GDT gdt[MAX_CPUS];
 
 static void set_gdt_entry(gdt_entry_t* entry, uint8_t access, uint8_t flags) {
     entry->limit_low = 0xFFFF;
@@ -52,7 +53,7 @@ static void set_gdt_entry(gdt_entry_t* entry, uint8_t access, uint8_t flags) {
 }
 
 void gdt_install(void) {
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < MAX_CPUS; i++) {
         // Index 1: Kernel Code
         set_gdt_entry(&gdt[i].entries[1], 0x9A, (1 << 5) | (1 << 7) | 0x0F);
         // Index 2: Kernel Data
@@ -97,4 +98,4 @@ void gdt_install(void) {
     );
 }
 
-arch_initcall(gdt_install);
+arch_initcall(gdt_install, PRIO_FIRST);

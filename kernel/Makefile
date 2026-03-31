@@ -5,9 +5,10 @@ K_OBJS := $(K_OBJS:.c=.o)
 K_OBJS := $(K_OBJS:.S=.o)
 
 K_CFLAGS := $(CFLAGS) -mcmodel=kernel -mno-red-zone \
-             -Iinclude \
-             -I.. \
-             -I../libc/include
+             -I $(BASE_DIR)/include \
+             -I $(BASE_DIR) \
+             -I $(BASE_DIR)/libc/include \
+			 -I $(BASE_DIR)/lib \
 
 .PHONY: all clean
 

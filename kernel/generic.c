@@ -34,7 +34,7 @@ void generic_entry() {
         }
     }
 
-    asm volatile("int $0");
+    asm volatile ("int $0");
 
     for (;;) arch_halt();
 }

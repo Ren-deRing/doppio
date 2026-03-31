@@ -5,10 +5,14 @@
 
 #include "kernel/cpu.h"
 #include "kernel/init.h"
+#include "kernel/printf.h"
+
+#define SERIAL_DEVICE 0x3F8
 
 static struct cpu cpus[MAX_CPUS];
 
-extern uint8_t __kernel_start[];
+extern uint8_t inb(uint16_t port);
+extern void outb(uint16_t port, uint8_t val);
 
 void fpu_init(void) {
     uintptr_t cr0, cr4;
@@ -37,9 +41,24 @@ void bsp_init(void) {
     // TODO
 }
 
+static char* log_write(const char* buffer, void* user, int size) {
+    (void)user;
+
+    for (int i = 0; i < size; ++i) {
+        outb(SERIAL_DEVICE, buffer[i]);
+    }
+    return (char*)buffer;
+}
+
+static void log_init(void) {
+	outb(SERIAL_DEVICE + 3, 0x03);
+    set_output_sink(&log_write);
+}
+
 void early_init(void) {
     fpu_init();
     bsp_init();
+    log_init();
 }
 
-/* Fixed: do_nothing's former kingdom... RIP 2026-2026 */
+/* Fixed: do_nothing(void)'s former kingdom... RIP 2026-2026 */

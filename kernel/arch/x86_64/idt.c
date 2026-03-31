@@ -1,5 +1,6 @@
 #include "kernel/init.h"
 #include "kernel/cpu.h"
+#include "kernel/printf.h"
 
 struct registers {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -48,11 +49,11 @@ void register_handler(uint8_t vector, handler_t handler, void *data) {
     handlers[vector].data = data;
 }
 
-void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags) {
+void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags, uint8_t ist) {
     uintptr_t addr = (uintptr_t)isr;
     idt[vector].isr_low    = addr & 0xFFFF;
-    idt[vector].kernel_cs  = 0x08; // GDT CS
-    idt[vector].ist        = 0;    // #DF 는 ist index 1로 연결됨 (in idt_install)
+    idt[vector].kernel_cs  = 0x08;       // GDT CS
+    idt[vector].ist        = ist & 0x07; // 하위 3비트
     idt[vector].attributes = flags;
     idt[vector].isr_mid    = (addr >> 16) & 0xFFFF;
     idt[vector].isr_high   = (addr >> 32) & 0xFFFFFFFF;
@@ -61,10 +62,11 @@ void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags) {
 
 void idt_install(void) {
     for (int i = 0; i < 48; i++) {
-        idt_set_descriptor(i, isr_stub_table[i], 0x8E);
+        uint8_t ist_index = (i == 8) ? 1 : 0; 
+        idt_set_descriptor(i, isr_stub_table[i], 0x8E, ist_index);
     }
 
-    idt[8].ist = 1; // for #DF
+    idt[8].ist = 1; // TODO: NOT TESTED
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uintptr_t)&idt;
@@ -76,30 +78,61 @@ void ap_idt_install(void) {
 	asm volatile ("lidt %0" : : "m"(idtr));
 }
 
-#include "boot/bootinfo.h"
+const char* exceptions[32] = {
+    "Divide-by-zero Error",
+    "Debug",                          // 1
+    "Non-maskable Interrupt",         // 2
+    "Breakpoint",                     // 3
+    "Overflow",                       // 4
+    "Bound Range Exceeded",           // 5
+    "Invalid Opcode",                 // 6
+    "Device Not Available",           // 7
+    "Double Fault",                   // 8
+    "Coprocessor Segment Overrun",    // 9 (Reserved in newer CPUs)
+    "Invalid TSS",                    // 10
+    "Segment Not Present",            // 11
+    "Stack-Segment Fault",            // 12
+    "General Protection Fault",       // 13
+    "Page Fault",                     // 14
+    "Reserved",                       // 15
+    "x87 Floating-Point Exception",   // 16
+    "Alignment Check",                // 17
+    "Machine Check",                  // 18
+    "SIMD Floating-Point Exception",  // 19
+    "Virtualization Exception",       // 20
+    "Control Protection Exception",   // 21
+    "Reserved",                       // 22
+    "Reserved",                       // 23
+    "Reserved",                       // 24
+    "Reserved",                       // 25
+    "Reserved",                       // 26
+    "Reserved",                       // 27
+    "Hypervisor Injection Exception", // 28
+    "VMM Communication Exception",    // 29
+    "Security Exception",             // 30
+    "Reserved"                        // 31
+};
+
+void panic(const char* description, struct registers *regs, uintptr_t address) {
+    dprintf("\n[KERNEL PANIC] %s (Vector: %d)\n", description, regs->int_no);
+    dprintf("Error Code: %08x\n", regs->err_code);
+    dprintf("RIP: %016llx  RSP: %016llx\n", regs->rip, regs->rsp);
+    dprintf("CS: %02x  SS: %02x  RFLAGS: %08x\n", regs->cs, regs->ss, regs->rflags);
+
+    for (;;) arch_halt();
+}
 
 static void isr_handler_inner(struct registers *regs) {
-    uint8_t v = (uint8_t)regs->int_no;
-    struct isr_slot *slot = &handlers[v];
+    uint8_t vector = (uint8_t)regs->int_no;
+    struct isr_slot *slot = &handlers[vector];
 
     if (slot->func) {
         slot->func(regs, slot->data);
     } else {
-        if (v < 32) {
-            uint32_t* fb_ptr = (uint32_t*)g_boot_info.fb.fb_addr;
-            uint32_t width = g_boot_info.fb.width;
-            uint32_t height = g_boot_info.fb.height;
-            uint32_t pixels_per_line = g_boot_info.fb.pitch / 4;
-
-            for (uint32_t y = height/2 - 50; y < height/2 + 50; y++) {
-                for (uint32_t x = width/2 - 50; x < width/2 + 50; x++) {
-                    fb_ptr[y * pixels_per_line + x] = 0xFF0000;
-                }
-            }
-            // panic("Unhandled Exception", regs, v);
-            for (;;) arch_halt();
-        } else if (v >= 32 && v < 48) {
-            // ack_irq(v - 32); 
+        if (vector < 32) {
+            panic(exceptions[regs->int_no], regs, regs->rip);
+        } else if (vector >= 32 && vector < 48) {
+            // ack_irq(vector - 32); 
         }
     }
 

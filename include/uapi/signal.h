@@ -14,7 +14,7 @@
 #define SIGSEGV     11  /* Segmentation fault */
 #define SIGUSR2     12  /* User-defined Signal #2 */
 #define SIGPIPE     13  /* Accessed a broken pipe */
-#define SIGALRM     14  /* wake up alarm (some kind of nightmare...) */
+#define SIGALRM     14  /* Wake up alarm (some kind of nightmare...) */
 #define SIGTERM     15  /* User killed you */
 
 #define SIGCHLD     17  /* Child status report */

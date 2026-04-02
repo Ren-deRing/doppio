@@ -1,3 +1,11 @@
+/*
+ * Mika Kernel Memory Allocator
+ *
+ * Copyright (c) 2026 Ren-deRing (JONGHYUN WON)
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "kernel/kmem.h"
 #include "kernel/init.h"
 #include "kernel/lock.h"
@@ -21,8 +29,6 @@ void kmem_init(void) {
         depots[i].objs_remaining = 0;
     }
 }
-
-static kmem_depot_t depots[KMEM_NUM_CLASSES];
 
 static int kmem_get_index(size_t size) {
     if (size <= 8) return 0;

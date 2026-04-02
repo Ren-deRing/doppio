@@ -1,6 +1,14 @@
+/*
+ * Mika Kernel Printf
+ *
+ * Copyright (c) 2017 Sean Barrett
+ * Copyright (c) 2026 Ren-deRing (JONGHYUN WON)
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "kernel/cpu.h"
 #include "kernel/printf.h"
-
 
 #define STB_SPRINTF_IMPLEMENTATION
 

@@ -2,12 +2,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
 #include "boot/bootinfo.h"
 
-#define PAGE_SIZE 4096
-#define PAGE_SIZE_2M (2ULL * 1024 * 1024)
-#define MAX_ORDER   11
+#define PAGE_SIZE       4096
+#define PAGE_SIZE_2M    (2ULL * 1024 * 1024)
+#define MAX_ORDER       11
 
 #define MMU_FLAGS_READ     (1ULL << 0)
 #define MMU_FLAGS_WRITE    (1ULL << 1)
@@ -15,13 +14,8 @@
 #define MMU_FLAGS_USER     (1ULL << 3)
 #define MMU_FLAGS_NOCACHE  (1ULL << 4)
 
-#define MMU_PROT_MMIO    (MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_NOCACHE)
-
-#define ALIGN_DOWN(addr, align) ((addr) & ~((align) - 1))
-#define ALIGN_UP(addr, align)   (((addr) + (align) - 1) & ~((align) - 1))
-
-#define KERNEL_VM_START 0xFFFFC00000000000
-#define KERNEL_VM_END   0xFFFFD00000000000
+#define ALIGN_DOWN(addr, align) ((uintptr_t)(addr) & ~((uintptr_t)(align) - 1))
+#define ALIGN_UP(addr, align)   (((uintptr_t)(addr) + (uintptr_t)(align) - 1) & ~((uintptr_t)(align) - 1))
 
 static inline void* p2v(uintptr_t phys) {
     return (void*)(phys + g_boot_info.hhdm_offset);
@@ -35,13 +29,16 @@ struct page {
     struct page* next;
     struct page* prev;
     
-    uint8_t order;
-    bool is_free;
-    uint32_t ref_count;
+    uint32_t     ref_count;
+    uint8_t      order;
+    bool         is_free;
+    uint16_t     flags;
 
-    void* freelist;
-    uint32_t inuse;
-    uintptr_t vaddr;
+    uint32_t     obj_size;
+    uint32_t     free_count;
+    
+    void* free_ptr;
+    uintptr_t    vaddr;
 };
 
 typedef struct page_table page_table_t;

@@ -1,11 +1,16 @@
 #include <stdint.h>
 #include <elf.h>
 
+#include "x86.h"
+
 #include "boot/bootinfo.h"
 
+#include "kernel/kmem.h"
 #include "kernel/cpu.h"
 #include "kernel/init.h"
 #include "kernel/printf.h"
+
+#define MSR_GS_BASE 0xC0000101
 
 #define SERIAL_DEVICE 0x3F8
 
@@ -32,13 +37,17 @@ void fpu_init(void) {
 }
 
 void bsp_init(void) {
-    int id = 0; 
+    int id = 0;
     struct cpu *c = &cpus[id];
 
     c->self = c;
     c->id = id;
 
-    // TODO
+    for (int i = 0; i < KMEM_NUM_CLASSES; i++) {
+        c->magazines[i] = NULL; 
+    }
+
+    wrmsr(MSR_GS_BASE, (uintptr_t)c);
 }
 
 static char* log_write(const char* buffer, void* user, int size) {

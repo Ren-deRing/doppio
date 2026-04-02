@@ -22,4 +22,15 @@ static inline void spin_unlock(spinlock_t *lock) {
     __sync_lock_release(&lock->locked);
 }
 
+static inline uint64_t spin_lock_irqsave(spinlock_t *lock) {
+    uint64_t flags = arch_irq_save();
+    spin_lock(lock);
+    return flags;
+}
+
+static inline void spin_unlock_irqrestore(spinlock_t *lock, uint64_t flags) {
+    spin_unlock(lock);
+    arch_irq_restore(flags);
+}
+
 #endif

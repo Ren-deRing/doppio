@@ -1,7 +1,5 @@
 #include "kernel/cpu.h"
 
-#define MSR_GS_BASE 0xC0000101
-
 cpu_status_t arch_irq_save(void) {
     cpu_status_t flags;
     asm volatile ("pushfq; pop %0; cli" : "=rm"(flags) :: "memory");
@@ -32,4 +30,32 @@ struct cpu* get_this_core(void) {
     struct cpu* ptr;
     asm volatile ("mov %%gs:0, %0" : "=r"(ptr));
     return ptr;
+}
+
+// x86
+
+void wrmsr(uint32_t msr, uint64_t val) {
+    uint32_t low = (uint32_t)val;
+    uint32_t high = (uint32_t)(val >> 32);
+
+    asm volatile (
+        "wrmsr"
+        :
+        : "c"(msr),
+          "a"(low),
+          "d"(high)
+        : "memory"
+    );
+}
+
+uint64_t rdmsr(uint32_t msr) {
+    uint32_t low, high;
+
+    asm volatile (
+        "rdmsr"
+        : "=a"(low), "=d"(high)
+        : "c"(msr)
+    );
+
+    return ((uint64_t)high << 32) | low;
 }

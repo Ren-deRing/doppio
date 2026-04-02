@@ -415,10 +415,6 @@ void vmm_init(void) {
 
         for (uint64_t phys = base; phys < top; phys += PAGE_SIZE_2M) {
             uint64_t virt = (uint64_t)p2v(phys);
-
-            if (virt >= KERNEL_VM_START && virt < KERNEL_VM_END) {
-                continue;
-            }
             vmm_map_huge(g_kernel_pagemap, virt, phys, X86_PTE_PRESENT | X86_PTE_WRITABLE);
         }
 

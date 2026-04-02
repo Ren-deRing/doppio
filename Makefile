@@ -87,7 +87,7 @@ run: iso
 	qemu-system-x86_64 \
 		-cdrom $(ISO_IMAGE) \
 		-m 8G \
-		-serial stdio -d int -no-reboot
+		-serial stdio -d int -no-reboot -cpu host -accel kvm
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

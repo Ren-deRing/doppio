@@ -4,12 +4,18 @@
 #include <stdbool.h>
 
 #define MAX_CPUS 64
+#define KMEM_NUM_CLASSES 16
+
+struct kmem_magazine;
+typedef struct kmem_magazine kmem_magazine_t; // TODO
 
 struct cpu {
     struct cpu *self;       
 //    struct task *current;   // running task
 //    struct task *idle;      // idle task
     uint32_t id;
+
+    kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
 
 typedef uint64_t cpu_status_t;

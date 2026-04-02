@@ -1,3 +1,11 @@
+/*
+ * Mika Kernel Low Level Memory Management Logic
+ *
+ * Copyright (c) 2026 Ren-deRing (JONGHYUN WON)
+ * 
+ * SPDX-License-Identifier: 0BSD
+ */
+
 #include <stdbool.h>
 
 #include "string.h"

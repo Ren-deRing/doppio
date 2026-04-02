@@ -4,7 +4,7 @@
  * Copyright (c) 2017 Sean Barrett
  * Copyright (c) 2026 Ren-deRing (JONGHYUN WON)
  * 
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: 0BSD
  */
 
 #include "kernel/cpu.h"

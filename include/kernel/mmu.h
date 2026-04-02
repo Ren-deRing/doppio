@@ -1,0 +1,61 @@
+#pragma once
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "boot/bootinfo.h"
+
+#define PAGE_SIZE 4096
+#define PAGE_SIZE_2M (2ULL * 1024 * 1024)
+#define MAX_ORDER   11
+
+#define MMU_FLAGS_READ     (1ULL << 0)
+#define MMU_FLAGS_WRITE    (1ULL << 1)
+#define MMU_FLAGS_EXEC     (1ULL << 2)
+#define MMU_FLAGS_USER     (1ULL << 3)
+#define MMU_FLAGS_NOCACHE  (1ULL << 4)
+
+#define MMU_PROT_MMIO    (MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_NOCACHE)
+
+#define ALIGN_DOWN(addr, align) ((addr) & ~((align) - 1))
+#define ALIGN_UP(addr, align)   (((addr) + (align) - 1) & ~((align) - 1))
+
+#define KERNEL_VM_START 0xFFFFC00000000000
+#define KERNEL_VM_END   0xFFFFD00000000000
+
+static inline void* p2v(uintptr_t phys) {
+    return (void*)(phys + g_boot_info.hhdm_offset);
+}
+
+static inline uintptr_t v2p(void* virt) {
+    return (uintptr_t)virt - g_boot_info.hhdm_offset;
+}
+
+struct page {
+    struct page* next;
+    struct page* prev;
+    
+    uint8_t order;
+    bool is_free;
+    uint32_t ref_count;
+
+    void* freelist;
+    uint32_t inuse;
+    uintptr_t vaddr;
+};
+
+typedef struct page_table page_table_t;
+typedef struct page page_t;
+
+page_t* page_alloc(uint8_t order);
+void page_free(page_t* page, uint8_t order);
+
+bool mmu_map(page_table_t* map, uintptr_t virt, uintptr_t phys, uint64_t flags);
+void mmu_unmap(page_table_t* map, uintptr_t virt);
+uintptr_t mmu_translate(page_table_t* map, uintptr_t virt);
+
+uint64_t page_to_phys(page_t* page);
+page_t* phys_to_page(uint64_t phys);
+
+page_table_t* mmu_get_active_map(void);
+page_table_t* mmu_get_kernel_map(void);

@@ -17,6 +17,7 @@ typedef uint64_t cpu_status_t;
 cpu_status_t arch_irq_save(void);
 void arch_irq_restore(cpu_status_t flags);
 void arch_halt(void);
+void arch_pause(void);
 void arch_irq_disable(void);
 void arch_irq_enable(void);
 struct cpu* get_this_core(void);

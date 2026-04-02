@@ -1,6 +1,11 @@
 #include "boot/bootinfo.h"
+
 #include "kernel/init.h"
 #include "kernel/cpu.h"
+#include "kernel/printf.h"
+#include "kernel/mmu.h"
+
+#include "string.h"
 
 void do_initcalls(void) {
     for (initcall_t* call = __initcall_start; call < __initcall_end; call++) {
@@ -9,7 +14,6 @@ void do_initcalls(void) {
         (*call)();
     }
 }
-
 void generic_entry() {
     early_init();
 
@@ -33,8 +37,6 @@ void generic_entry() {
             fb_ptr[y * pixels_per_line + x] = 0xFFFFFF; // 흰색 점
         }
     }
-
-    asm volatile ("int $0");
 
     for (;;) arch_halt();
 }

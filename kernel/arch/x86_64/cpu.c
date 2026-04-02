@@ -24,6 +24,10 @@ void arch_halt(void) {
     asm volatile ("hlt");
 }
 
+void arch_pause(void) {
+    asm volatile ("pause");
+}
+
 struct cpu* get_this_core(void) {
     struct cpu* ptr;
     asm volatile ("mov %%gs:0, %0" : "=r"(ptr));

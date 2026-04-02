@@ -86,7 +86,7 @@ iso: all
 run: iso
 	qemu-system-x86_64 \
 		-cdrom $(ISO_IMAGE) \
-		-m 512M \
+		-m 8G \
 		-serial stdio -d int -no-reboot
 
 clean:

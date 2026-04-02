@@ -1,5 +1,4 @@
-#ifndef __KERNEL_LOCK_H
-#define __KERNEL_LOCK_H
+#pragma once
 
 #include <stdint.h>
 #include "kernel/cpu.h"
@@ -32,5 +31,3 @@ static inline void spin_unlock_irqrestore(spinlock_t *lock, uint64_t flags) {
     spin_unlock(lock);
     arch_irq_restore(flags);
 }
-
-#endif

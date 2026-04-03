@@ -316,4 +316,4 @@ void* kcalloc(size_t nmemb, size_t size) {
     return ptr;
 }
 
-mem_initcall(kmem_init, PRIO_THIRD);
+mem_initcall(kmem_init, PRIO_LAST);

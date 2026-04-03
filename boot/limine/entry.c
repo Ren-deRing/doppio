@@ -7,6 +7,7 @@
 static MemoryRegion g_mmap_storage[MAX_MMAP_ENTRIES];
 static CoreInfo     g_core_storage[MAX_CORE_ENTRIES];
 
+extern void ap_entry(CoreInfo* info);
 extern void generic_entry();
 
 static volatile struct limine_memmap_request memmap_req = { .id = LIMINE_MEMMAP_REQUEST_ID, .revision = 0 };
@@ -80,6 +81,12 @@ void boot_entry(void) {
             g_core_storage[i].boot_stack_ptr = (void*)smp->cpus[i]->extra_argument;
         }
         g_boot_info.smp.cores = g_core_storage;
+
+        for (uint32_t i = 0; i < smp->cpu_count; i++) {
+            if (smp->cpus[i]->lapic_id == smp->bsp_lapic_id) continue;
+            smp->cpus[i]->goto_address = (CoreInfo*)ap_entry; 
+            smp->cpus[i]->extra_argument = (uintptr_t)&g_core_storage[i];
+        }
     }
 
     /* System Tables */

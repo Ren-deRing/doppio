@@ -28,7 +28,23 @@ typedef void (*initcall_t)(void);
 #define subsys_initcall(...) __INITCALL_SELECT(__VA_ARGS__, __initcall_with_sub, __initcall_no_sub)(3, __VA_ARGS__)
 #define late_initcall(...)   __INITCALL_SELECT(__VA_ARGS__, __initcall_with_sub, __initcall_no_sub)(4, __VA_ARGS__)
 
+// AP
+#define __ap_initcall_with_sub(level, fn, sub) \
+    static initcall_t __ap_initcall_##level##sub##_##fn __attribute__((used, \
+    section(".ap_initcall." #level "." #sub), aligned(8))) = fn
+
+#define __ap_initcall_no_sub(level, fn) \
+    static initcall_t __ap_initcall_##level##5_##fn __attribute__((used, \
+    section(".ap_initcall." #level ".5"), aligned(8))) = fn
+
+#define ap_arch_initcall(...)   __INITCALL_SELECT(__VA_ARGS__, __ap_initcall_with_sub, __ap_initcall_no_sub)(0, __VA_ARGS__)
+
+
 extern initcall_t __initcall_start[];
 extern initcall_t __initcall_end[];
 
+extern initcall_t __ap_initcall_start[];
+extern initcall_t __ap_initcall_end[];
+
 void early_init(void);
+void ap_early_init(uint32_t cpu_id);

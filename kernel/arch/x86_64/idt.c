@@ -157,3 +157,5 @@ void isr_handler(struct registers *regs) {
 }
 
 arch_initcall(idt_install, PRIO_SECOND);
+
+ap_arch_initcall(ap_idt_install, PRIO_SECOND);

@@ -36,12 +36,11 @@ void fpu_init(void) {
     asm volatile ("fninit");
 }
 
-void bsp_init(void) {
-    int id = 0;
-    struct cpu *c = &cpus[id];
+void cpu_init(uint32_t cpu_id) {
+    struct cpu *c = &cpus[cpu_id];
 
     c->self = c;
-    c->id = id;
+    c->id = cpu_id;
 
     for (int i = 0; i < KMEM_NUM_CLASSES; i++) {
         c->magazines[i] = NULL; 
@@ -66,8 +65,13 @@ static void log_init(void) {
 
 void early_init(void) {
     fpu_init();
-    bsp_init();
+    cpu_init(0);
     log_init();
+}
+
+void ap_early_init(uint32_t cpu_id) {
+    fpu_init();
+    cpu_init(cpu_id);
 }
 
 /* Fixed: do_nothing(void)'s former kingdom... RIP 2026-2026 */

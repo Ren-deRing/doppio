@@ -63,6 +63,24 @@ static void set_gdt_entry(gdt_entry_t* entry, uint8_t access, uint8_t flags) {
     entry->base_high = 0;
 }
 
+static inline void gdt_load(gdt_pointer_t* ptr) {
+    asm volatile (
+        "lgdt %0\n"
+        "push $0x08\n"
+        "lea 1f(%%rip), %%rax\n"
+        "push %%rax\n"
+        "lretq\n"
+        "1:\n"
+        "mov $0x10, %%ax\n"
+        "mov %%ax, %%ds\n"
+        "mov %%ax, %%es\n"
+        "mov %%ax, %%ss\n"
+        "mov $0x30, %%ax\n"
+        "ltr %%ax\n"
+        : : "m"(*ptr) : "rax", "memory"
+    );
+}
+
 void gdt_install(void) {
     for (int i = 0; i < MAX_CPUS; i++) {
         // Index 1: Kernel Code
@@ -92,21 +110,14 @@ void gdt_install(void) {
     }
 
     // BSP 적용
-    asm volatile (
-        "lgdt %0\n"
-        "push $0x08\n"
-        "lea 1f(%%rip), %%rax\n"
-        "push %%rax\n"
-        "lretq\n"
-        "1:\n"
-        "mov $0x10, %%ax\n"
-        "mov %%ax, %%ds\n"
-        "mov %%ax, %%es\n"
-        "mov %%ax, %%ss\n"
-        "mov $0x30, %%ax\n"             // TSS Index 6 * 8
-        "ltr %%ax\n"                    // TSS load
-        : : "m"(gdt[0].pointer) : "rax", "memory"
-    );
+    gdt_load(&gdt[0].pointer);
+}
+
+void ap_gdt_install(void) {
+    struct cpu* c = get_this_core();
+    gdt_load(&gdt[c->id].pointer);
 }
 
 arch_initcall(gdt_install, PRIO_FIRST);
+
+ap_arch_initcall(ap_gdt_install, PRIO_FIRST);

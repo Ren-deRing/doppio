@@ -30,6 +30,16 @@ SECTIONS
         __initcall_end = .;
     } :rodata
 
+    . = ALIGN(8);
+
+    .ap_initcall : {
+        __ap_initcall_start = .;
+        QUAD(0);
+        KEEP(*(SORT_BY_NAME(.ap_initcall.*)))
+        QUAD(0)
+        __ap_initcall_end = .;
+    } :rodata
+
     .rodata : {
         __rodata_start = .;
         *(.rodata .rodata.*)

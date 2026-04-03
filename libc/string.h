@@ -4,6 +4,7 @@
 
 void *memset(void *dest, int ch, size_t count);
 void *memcpy(void *dest, const void *src, size_t count);
+int memcmp(const void *s1, const void *s2, size_t n);
 
 size_t strlen(const char *s);
 size_t strnlen(const char *s, size_t maxlen);

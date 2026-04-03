@@ -4,6 +4,8 @@
 #include <stdbool.h>
 
 #define MAX_CPUS 64
+#define MAX_ISO 256
+
 #define KMEM_NUM_CLASSES 16
 
 struct kmem_magazine;

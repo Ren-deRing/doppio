@@ -5,6 +5,7 @@
 #include "kernel/printf.h"
 #include "kernel/mmu.h"
 #include "kernel/kmem.h"
+#include "kernel/intc.h"
 
 #include "string.h"
 
@@ -67,11 +68,11 @@ void ap_entry(CoreInfo* info) {
 
     // atomic_inc(&initialized_cores);
 
-    if (info->hw_id == 1) {
-        volatile int a = 10;
-        volatile int b = 0;
-        volatile int c = a / b;
-    }
+    // if (info->hw_id == 1) {
+    //     volatile int a = 10;
+    //     volatile int b = 0;
+    //     volatile int c = a / b;
+    // }
 
     for (;;) arch_halt();
 }

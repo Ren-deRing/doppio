@@ -87,7 +87,8 @@ run: iso
 	qemu-system-x86_64 \
 		-cdrom $(ISO_IMAGE) \
 		-m 8G \
-		-serial stdio -d int -smp 4
+		-bios /usr/share/ovmf/OVMF.fd \
+		-serial stdio -d int -smp 4 -machine q35
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

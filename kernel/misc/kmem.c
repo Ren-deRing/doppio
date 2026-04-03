@@ -16,6 +16,11 @@ const uint32_t kmem_class_sizes[KMEM_NUM_CLASSES] = {
     8, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1280, 1536, 2048
 };
 
+static const uint8_t kmem_class_init_orders[KMEM_NUM_CLASSES] = {
+    0, 0, 0, 0, 0, 0, 0, 0, // 8B ~ 192B: 4KB (Order 0)
+    4, 4, 4, 4, 4, 4, 4, 4  // 256B ~ 2048B: 64KB (Order 4)
+};
+
 static kmem_depot_t depots[KMEM_NUM_CLASSES];
 
 void kmem_init(void) {
@@ -27,6 +32,7 @@ void kmem_init(void) {
         depots[i].empty_count = 0;
         depots[i].current_chunk = 0;
         depots[i].objs_remaining = 0;
+        depots[i].current_order = kmem_class_init_orders[i];
     }
 }
 
@@ -55,16 +61,6 @@ static void* kmem_alloc_large(size_t size) {
     p->order = order;
     
     return (void*)p2v(page_to_phys(p));
-}
-
-static void kmem_setup_bibop(uintptr_t vaddr, uint32_t obj_size) {
-    uintptr_t phys_start = v2p((void*)vaddr);
-    for (int i = 0; i < 512; i++) {
-        page_t* page = phys_to_page(phys_start + (i * PAGE_SIZE));
-        page->obj_size = obj_size;
-        page->vaddr = vaddr + (i * PAGE_SIZE);
-        page->is_free = false;
-    }
 }
 
 static kmem_magazine_t* kmem_internal_mag_alloc(void) {
@@ -143,6 +139,23 @@ static void kmem_magazine_swap_full(int idx) {
     }
 }
 
+static void kmem_setup_slab_page(page_t* p, uint32_t obj_size, uint8_t order) {
+    uint32_t num_pages = (1U << order);
+    uint32_t total_size = (PAGE_SIZE << order);
+    uint32_t max_objs = total_size / obj_size;
+
+    p->obj_size = obj_size;
+    p->order = order;
+    p->free_count = max_objs;
+    p->is_free = false;
+
+    page_t* curr_pg = p;
+    for (uint32_t i = 0; i < num_pages; i++) {
+        curr_pg->obj_size = obj_size;
+        curr_pg++;
+    }
+}
+
 static void* kmem_depot_refill(int idx) {
     kmem_depot_t* d = &depots[idx];
     uint32_t size = kmem_class_sizes[idx];
@@ -150,20 +163,25 @@ static void* kmem_depot_refill(int idx) {
     uint64_t flags = spin_lock_irqsave(&d->lock);
 
     if (d->objs_remaining == 0) {
-        page_t* p = page_alloc(9); // 2MB
+        uint8_t order = d->current_order;
+        page_t* p = page_alloc(order);
         if (!p) {
             spin_unlock_irqrestore(&d->lock, flags);
             return NULL;
         }
+
         d->current_chunk = (uintptr_t)p2v(page_to_phys(p));
-        d->objs_remaining = PAGE_SIZE_2M / size;
-        
-        kmem_setup_bibop(d->current_chunk, size);
+        d->objs_remaining = (PAGE_SIZE << order) / size;
+
+        kmem_setup_slab_page(p, size, order);
     }
 
     void* obj = (void*)d->current_chunk;
     d->current_chunk += size;
     d->objs_remaining--;
+
+    page_t* page = phys_to_page(v2p(obj));
+    __atomic_sub_fetch(&page->free_count, 1, __ATOMIC_RELAXED);
 
     spin_unlock_irqrestore(&d->lock, flags);
     return obj;
@@ -243,6 +261,8 @@ void kfree(void* ptr) {
         page_free(page, page->order);
         return;
     }
+
+    __atomic_add_fetch(&page->free_count, 1, __ATOMIC_RELAXED);
 
     int idx = kmem_get_index(page->obj_size);
     struct cpu* c = get_this_core();

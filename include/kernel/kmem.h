@@ -26,6 +26,8 @@ typedef struct kmem_depot {
 
     uintptr_t current_chunk;
     uint32_t  objs_remaining;
+
+    uint8_t   current_order;
 } kmem_depot_t;
 
 void* kmalloc(size_t size);

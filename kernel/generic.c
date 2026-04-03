@@ -40,7 +40,5 @@ void generic_entry() {
         }
     }
 
-    kmem_chaos_test();
-
     for (;;) arch_halt();
 }

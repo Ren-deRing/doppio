@@ -40,6 +40,9 @@ struct acpi_info {
     uintptr_t lapic_paddr;
 
     uintptr_t ioapic_addr;
+    uintptr_t ioapic_paddr;
+
+    uintptr_t hpet_paddr;
     uintptr_t hpet_addr;
 
     struct madt* madt; 

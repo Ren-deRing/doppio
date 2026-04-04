@@ -6,6 +6,7 @@
 #include "kernel/mmu.h"
 #include "kernel/kmem.h"
 #include "kernel/intc.h"
+#include "kernel/clock.h"
 
 #include "string.h"
 
@@ -27,34 +28,20 @@ void do_ap_initcalls(void) {
     }
 }
 
-void ipi_pong_handler(struct registers *regs, void *data) {
-    dprintf("\n[CPU %d] IPI PONG!\n", get_this_core()->id);
-    
-    if (g_intc && g_intc->eoi) {
-        g_intc->eoi();
-    }
-}
-
 void generic_entry() {
     early_init(g_boot_info.smp.bsp_hw_id);
     do_initcalls();
 
-    if (g_intc && g_intc->register_handler) {
-        g_intc->register_handler(0x40, ipi_pong_handler, NULL);
+    for (int i = 0; i < 10; i++) {
+        udelay(100000); // 100ms
+        dprintf(".");
     }
+    dprintf(" Done!\n");
 
     ap_release = true;
     __sync_synchronize();
 
-    for (volatile uint64_t i = 0; i < 0x10000000; i++) {
-        __asm__("nop");
-    }
-
     arch_irq_enable();
-
-    dprintf("BSP: PING BRO\n");
-    uint32_t target_lapic = cpus[1].hw_id;
-    g_intc->send_ipi(target_lapic, 0x40);
 
     for (;;) arch_halt();
 }

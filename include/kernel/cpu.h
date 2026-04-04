@@ -18,6 +18,9 @@ struct cpu {
     uint32_t id;
     uint32_t hw_id;
 
+    uint64_t timer_ticks_per_ms; 
+    bool timer_ready;
+
     kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
 

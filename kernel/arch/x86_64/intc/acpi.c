@@ -35,7 +35,7 @@ void acpi_init() {
         if (memcmp(table->signature, "APIC", 4) == 0) {
             acpi_info.madt = (struct madt*)table;
             madt_init(acpi_info.madt);
-        } 
+        }
         // FADT
         else if (memcmp(table->signature, "FACP", 4) == 0) {
             acpi_info.fadt = (struct fadt*)table;
@@ -45,6 +45,7 @@ void acpi_init() {
             struct hpet* h = (struct hpet*)table;
     
             uint64_t val = h->address.address;
+            acpi_info.hpet_paddr = (uintptr_t)val;
             acpi_info.hpet_addr = (uintptr_t)(p2v(val));
         }
     }
@@ -70,6 +71,7 @@ void madt_init(struct madt* m) {
                 break;
             }
             case 1: { // I/O APIC
+                acpi_info.ioapic_paddr = (uintptr_t)(*(uint32_t*)&ptr[4]);
                 acpi_info.ioapic_addr = (uintptr_t)(p2v(*(uint32_t*)&ptr[4]));
                 break;
             }

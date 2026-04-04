@@ -7,12 +7,12 @@
  * SPDX-License-Identifier: 0BSD
  */
 
-#include "kernel/cpu.h"
-#include "kernel/printf.h"
+#include <kernel/cpu.h>
+#include <kernel/printf.h>
 
 #define STB_SPRINTF_IMPLEMENTATION
 
-#include "lib/stb_sprintf.h"
+#include <lib/stb_sprintf.h>
 
 static kprint_callback_t active_kprint_sink;
 

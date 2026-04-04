@@ -12,15 +12,21 @@ struct kmem_magazine;
 typedef struct kmem_magazine kmem_magazine_t; // TODO
 
 struct cpu {
-    struct cpu *self;       
+    struct cpu *self;
 //    struct task *current;   // running task
 //    struct task *idle;      // idle task
     uint32_t id;
+    uint32_t hw_id;
 
     kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
 
 typedef uint64_t cpu_status_t;
+
+struct registers;
+typedef void (*handler_t)(struct registers *regs, void *data);
+
+extern struct cpu cpus[MAX_CPUS];
 
 cpu_status_t arch_irq_save(void);
 void arch_irq_restore(cpu_status_t flags);

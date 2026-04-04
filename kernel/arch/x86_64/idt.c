@@ -16,8 +16,6 @@ struct registers {
     uint64_t ss;
 } __attribute__((packed));
 
-typedef void (*handler_t)(struct registers *regs, void *data);
-
 struct isr_slot {
     handler_t func;
     void *data;
@@ -61,12 +59,11 @@ void idt_set_descriptor(uint8_t vector, void* isr, uint8_t flags, uint8_t ist) {
 }
 
 void idt_install(void) {
-    for (int i = 0; i < 48; i++) {
-        uint8_t ist_index = (i == 8) ? 1 : 0; 
-        idt_set_descriptor(i, isr_stub_table[i], 0x8E, ist_index);
+    for (int i = 0; i < 256; i++) {
+        uint8_t ist_index = (i == 8) ? 1 : 0;
+        if (i == 8 || i == 14) ist_index = 1;
+        idt_set_descriptor(i, (void*)isr_stub_table[i], 0x8E, ist_index);
     }
-
-    idt[8].ist = 1; // TODO: NOT TESTED
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uintptr_t)&idt;

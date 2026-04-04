@@ -14,7 +14,7 @@
 
 #define SERIAL_DEVICE 0x3F8
 
-static struct cpu cpus[MAX_CPUS];
+struct cpu cpus[MAX_CPUS];
 
 extern uint8_t inb(uint16_t port);
 extern void outb(uint16_t port, uint8_t val);
@@ -36,11 +36,12 @@ void fpu_init(void) {
     asm volatile ("fninit");
 }
 
-void cpu_init(uint32_t cpu_id) {
-    struct cpu *c = &cpus[cpu_id];
+void cpu_init(uint32_t logic_id, uint32_t hw_id) {
+    struct cpu *c = &cpus[logic_id];
 
     c->self = c;
-    c->id = cpu_id;
+    c->id = logic_id;
+    c->hw_id = hw_id;
 
     for (int i = 0; i < KMEM_NUM_CLASSES; i++) {
         c->magazines[i] = NULL; 
@@ -63,15 +64,19 @@ static void log_init(void) {
     set_output_sink(&log_write);
 }
 
-void early_init(void) {
+void early_init(uint32_t hw_id) {
     fpu_init();
-    cpu_init(0);
+    cpu_init(0, hw_id);
     log_init();
 }
 
-void ap_early_init(uint32_t cpu_id) {
+static volatile int next_id = 1;
+
+void ap_early_init(uint32_t hw_id) {
+    int id = __sync_fetch_and_add(&next_id, 1); 
+
     fpu_init();
-    cpu_init(cpu_id);
+    cpu_init(id, hw_id);
 }
 
 /* Fixed: do_nothing(void)'s former kingdom... RIP 2026-2026 */

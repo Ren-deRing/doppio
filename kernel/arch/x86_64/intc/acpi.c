@@ -12,23 +12,6 @@
 #include "string.h"
 
 struct acpi_info acpi_info = {0};
-struct interrupt_controller* g_intc = NULL;
-
-int x86_get_cpu_count(void) {
-    return acpi_info.cpu_count;
-}
-
-void x86_lapic_eoi(void) {
-    volatile uint32_t* eoi_reg = (uint32_t*)(acpi_info.lapic_addr + 0xB0);
-    *eoi_reg = 0;
-}
-
-static struct interrupt_controller x86_intc = {
-    .name = "LAPIC/IOAPIC",
-    .get_cpu_count = x86_get_cpu_count,
-    .eoi = x86_lapic_eoi,
-    .send_ipi = NULL,
-};
 
 // TODO: REVISION PANIC
 
@@ -65,10 +48,10 @@ void acpi_init() {
             acpi_info.hpet_addr = (uintptr_t)(p2v(val));
         }
     }
-    g_intc = &x86_intc;
 }
 
 void madt_init(struct madt* m) {
+    acpi_info.lapic_paddr = m->lapic_addr;
     acpi_info.lapic_addr = (uintptr_t)p2v(m->lapic_addr);
 
     uint8_t* ptr = m->entries;

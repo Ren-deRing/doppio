@@ -37,6 +37,8 @@ struct madt_entry_header {
 
 struct acpi_info {
     uintptr_t lapic_addr;
+    uintptr_t lapic_paddr;
+
     uintptr_t ioapic_addr;
     uintptr_t hpet_addr;
 
@@ -59,3 +61,5 @@ struct acpi_info {
 
 void acpi_init();
 void madt_init(struct madt* m);
+
+extern struct acpi_info acpi_info;

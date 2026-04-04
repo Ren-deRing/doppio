@@ -46,5 +46,5 @@ extern initcall_t __initcall_end[];
 extern initcall_t __ap_initcall_start[];
 extern initcall_t __ap_initcall_end[];
 
-void early_init(void);
-void ap_early_init(uint32_t cpu_id);
+void early_init(uint32_t hw_id);
+void ap_early_init(uint32_t hw_id);

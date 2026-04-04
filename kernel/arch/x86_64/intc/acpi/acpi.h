@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kernel/cpu.h"
+#include <kernel/cpu.h>
 
 #include "acpi_types.h"
 #include "fadt.h"

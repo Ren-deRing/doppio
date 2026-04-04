@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "kernel/lock.h"
-#include "kernel/mmu.h"
+#include <kernel/lock.h>
+#include <kernel/mmu.h>
 
 #define KMEM_NUM_CLASSES  16
 #define KMEM_MAG_CAPACITY 16

@@ -1,6 +1,6 @@
-#include "kernel/init.h"
-#include "kernel/cpu.h"
-#include "kernel/printf.h"
+#include <kernel/init.h>
+#include <kernel/cpu.h>
+#include <kernel/printf.h>
 
 struct registers {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -110,7 +110,7 @@ const char* exceptions[32] = {
     "Reserved"                        // 31
 };
 
-void panic(const char* description, struct registers *regs, uintptr_t address) {
+void panic(const char* description, struct registers *regs) {
     dprintf("\n[KERNEL PANIC] %s (Vector: %d)\n", description, regs->int_no);
     dprintf("Error Code: %08x\n", regs->err_code);
     dprintf("RIP: %016llx  RSP: %016llx\n", regs->rip, regs->rsp);
@@ -127,7 +127,7 @@ static void isr_handler_inner(struct registers *regs) {
         slot->func(regs, slot->data);
     } else {
         if (vector < 32) {
-            panic(exceptions[regs->int_no], regs, regs->rip);
+            panic(exceptions[regs->int_no], regs);
         } else if (vector >= 32 && vector < 48) {
             // ack_irq(vector - 32); 
         }

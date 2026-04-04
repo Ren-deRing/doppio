@@ -1,8 +1,8 @@
-#include "kernel/intc.h"
-#include "kernel/printf.h"
-#include "kernel/init.h"
-#include "kernel/mmu.h"
-#include "kernel/clock.h"
+#include <kernel/intc.h>
+#include <kernel/printf.h>
+#include <kernel/init.h>
+#include <kernel/mmu.h>
+#include <kernel/clock.h>
 
 #include "acpi/acpi.h"
 

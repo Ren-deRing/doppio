@@ -32,12 +32,6 @@ void generic_entry() {
     early_init(g_boot_info.smp.bsp_hw_id);
     do_initcalls();
 
-    for (int i = 0; i < 10; i++) {
-        udelay(100000); // 100ms
-        dprintf(".");
-    }
-    dprintf(" Done!\n");
-
     ap_release = true;
     __sync_synchronize();
 

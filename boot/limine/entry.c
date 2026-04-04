@@ -84,7 +84,7 @@ void boot_entry(void) {
 
         for (uint32_t i = 0; i < smp->cpu_count; i++) {
             if (smp->cpus[i]->lapic_id == smp->bsp_lapic_id) continue;
-            smp->cpus[i]->goto_address = (CoreInfo*)ap_entry; 
+            smp->cpus[i]->goto_address = (void (*)(struct limine_mp_info *))ap_entry; 
             smp->cpus[i]->extra_argument = (uintptr_t)&g_core_storage[i];
         }
     }

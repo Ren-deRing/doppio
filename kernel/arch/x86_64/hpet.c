@@ -1,9 +1,9 @@
 #include "intc/acpi/hpet.h"
 #include "intc/acpi/acpi.h"
 
-#include "kernel/mmu.h"
-#include "kernel/init.h"
-#include "kernel/clock.h"
+#include <kernel/mmu.h>
+#include <kernel/init.h>
+#include <kernel/clock.h>
 
 static volatile uint64_t* hpet_regs;
 static uint32_t hpet_period_fs;

@@ -1,8 +1,8 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "kernel/init.h"
-#include "kernel/cpu.h"
+#include <kernel/init.h>
+#include <kernel/cpu.h>
 
 typedef struct tss_entry {
 	uint32_t reserved_0;

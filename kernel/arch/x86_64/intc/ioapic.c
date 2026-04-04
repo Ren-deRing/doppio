@@ -1,6 +1,6 @@
 #include "acpi/acpi.h"
 
-#include "kernel/mmu.h"
+#include <kernel/mmu.h>
 
 #define IOAPIC_REG_INDEX  0x00
 #define IOAPIC_REG_DATA   0x10

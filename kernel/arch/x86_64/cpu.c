@@ -1,4 +1,4 @@
-#include "kernel/cpu.h"
+#include <kernel/cpu.h>
 
 cpu_status_t arch_irq_save(void) {
     cpu_status_t flags;

@@ -3,12 +3,12 @@
 
 #include "x86.h"
 
-#include "boot/bootinfo.h"
+#include <boot/bootinfo.h>
 
-#include "kernel/kmem.h"
-#include "kernel/cpu.h"
-#include "kernel/init.h"
-#include "kernel/printf.h"
+#include <kernel/kmem.h>
+#include <kernel/cpu.h>
+#include <kernel/init.h>
+#include <kernel/printf.h>
 
 #define MSR_GS_BASE 0xC0000101
 

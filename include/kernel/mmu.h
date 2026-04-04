@@ -2,7 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "boot/bootinfo.h"
+
+#include <boot/bootinfo.h>
 
 #define PAGE_SIZE       4096
 #define PAGE_SIZE_2M    (2ULL * 1024 * 1024)

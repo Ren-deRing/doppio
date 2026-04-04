@@ -8,15 +8,15 @@
 
 #include <stdbool.h>
 
-#include "string.h"
+#include <string.h>
 
-#include "kernel/printf.h"
-#include "kernel/init.h"
-#include "kernel/mmu.h"
+#include <kernel/printf.h>
+#include <kernel/init.h>
+#include <kernel/mmu.h>
 
-#include "boot/bootinfo.h"
+#include <boot/bootinfo.h>
 
-#include "uapi/elf.h"
+#include <uapi/elf.h>
 
 #define X86_PTE_PRESENT  (1ULL << 0)
 #define X86_PTE_WRITABLE (1ULL << 1)

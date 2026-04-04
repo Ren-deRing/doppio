@@ -1,15 +1,15 @@
 #include <limine.h>
 
-#include "kernel/mmu.h"
-#include "kernel/intc.h"
-#include "kernel/init.h"
-#include "kernel/printf.h"
+#include <kernel/mmu.h>
+#include <kernel/intc.h>
+#include <kernel/init.h>
+#include <kernel/printf.h>
 
-#include "boot/bootinfo.h"
+#include <boot/bootinfo.h>
 
 #include "acpi/acpi.h"
 
-#include "string.h"
+#include <string.h>
 
 struct acpi_info acpi_info = {0};
 

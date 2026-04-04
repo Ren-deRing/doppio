@@ -3,7 +3,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-#include "lib/stb_sprintf.h"
+#include <lib/stb_sprintf.h>
 
 typedef char* (*kprint_callback_t)(const char* buf, void* user, int len);
 

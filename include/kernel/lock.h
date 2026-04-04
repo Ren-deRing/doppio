@@ -1,7 +1,8 @@
 #pragma once
 
 #include <stdint.h>
-#include "kernel/cpu.h"
+
+#include <kernel/cpu.h>
 
 typedef struct {
     volatile int locked;

@@ -6,11 +6,11 @@
  * SPDX-License-Identifier: 0BSD
  */
 
-#include "kernel/kmem.h"
-#include "kernel/init.h"
-#include "kernel/lock.h"
+#include <kernel/kmem.h>
+#include <kernel/init.h>
+#include <kernel/lock.h>
 
-#include "string.h"
+#include <string.h>
 
 const uint32_t kmem_class_sizes[KMEM_NUM_CLASSES] = {
     8, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1280, 1536, 2048

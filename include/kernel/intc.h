@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "kernel/cpu.h"
+#include <kernel/cpu.h>
 
 struct interrupt_controller {
     const char* name;

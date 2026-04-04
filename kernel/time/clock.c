@@ -1,6 +1,6 @@
-#include "kernel/cpu.h"
-#include "kernel/clock.h"
-#include "kernel/printf.h"
+#include <kernel/cpu.h>
+#include <kernel/clock.h>
+#include <kernel/printf.h>
 
 static struct clock_source *current_clock = 0;
 static uint64_t boot_time_ns = 0;

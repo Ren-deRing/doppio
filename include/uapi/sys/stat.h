@@ -2,6 +2,20 @@
 
 #include <uapi/types.h>
 
+#define S_IFMT   0170000  /* 파일 타입 비트 마스크 */
+
+#define S_IFSOCK 0140000  /* 소켓 */
+#define S_IFLNK  0120000  /* 심볼릭 링크 */
+#define S_IFREG  0100000  /* 일반 파일 */
+#define S_IFBLK  0060000  /* 블록 장치 */
+#define S_IFDIR  0040000  /* 디렉토리 */
+#define S_IFCHR  0020000  /* 문자 장치 */
+#define S_IFIFO  0010000  /* FIFO */
+
+#define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
+#define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
+#define S_ISLNK(m)  (((m) & S_IFMT) == S_IFLNK)
+
 struct stat {
     dev_t      st_dev;      /* 장치 ID */
     ino_t      st_ino;      /* 인덱스 노드 번호 */

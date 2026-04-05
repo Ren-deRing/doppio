@@ -1,13 +1,18 @@
 #pragma once
 
 #include <uapi/sys/stat.h>
+
+#include <kernel/list.h>
 #include <kernel/lock.h>
+
+#define VNODE_HASH_SIZE 512
 
 struct vnode;
 
 struct vnode_ops {
     int (*lookup)(struct vnode *dvp, const char *name, struct vnode **vpp);
     int (*create)(struct vnode *dvp, const char *name, mode_t mode, struct vnode **vpp);
+    int (*mkdir)(struct vnode *dvp, const char *name, mode_t mode);
     int (*open)(struct vnode *vp, int flags);
     int (*close)(struct vnode *vp);
     ssize_t (*read)(struct vnode *vp, void *buf, size_t n, off_t off);
@@ -15,19 +20,35 @@ struct vnode_ops {
     int (*getattr)(struct vnode *vp, struct stat *st);
     int (*setattr)(struct vnode *vp, struct stat *st);
     int (*readdir)(struct vnode *vp, void *dirent_buf, size_t count, off_t *off);
+    int (*inactive)(struct vnode *vp);
+    int (*remove)(struct vnode *dvp, const char *name);
+    int (*rmdir)(struct vnode *dvp, const char *name);
 };
 
 struct vnode {
     uint32_t          ref_count;
     uint32_t          type;
     struct vnode_ops *ops;
-    struct mount     *mnt; // 소속된 마운트
+    struct mount     *mnt;
     void             *data;
     spinlock_t        lock;
+
+    struct list_node  v_all;
+    struct list_node  v_freelist;
+    struct list_node v_hash;
+
+    struct vnode *v_parent;
+    char v_name[32];
 };
 
 static inline void vref(struct vnode *vn) {
     if (vn) __atomic_fetch_add(&vn->ref_count, 1, __ATOMIC_SEQ_CST);
 }
 
+void vnode_init(void);
+
+struct vnode* vnode_alloc(uint32_t type, struct vnode_ops *ops);
+int vfs_cached_lookup(struct vnode *dvp, const char *name, struct vnode **vpp);
+void vfs_hash_insert(struct vnode *dvp, const char *name, struct vnode *vp);
 void vput(struct vnode *vn);
+int vget(struct vnode *vp);

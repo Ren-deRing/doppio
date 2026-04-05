@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 
+#define NAME_MAX 255
+#define PATH_MAX 4096
+
 typedef int64_t  ssize_t;
 typedef uint64_t size_t;
 typedef int64_t  off_t;
@@ -22,5 +25,5 @@ struct timespec {
     int64_t tv_nsec;        // ns
 };
 
-typedef int32_t  pid_t;
-typedef uint32_t id_t;
+typedef int32_t pid_t;
+typedef int32_t tid_t;

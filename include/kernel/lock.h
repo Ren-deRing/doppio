@@ -8,6 +8,8 @@ typedef struct {
     volatile int locked;
 } spinlock_t;
 
+#define SPINLOCK_INITIALIZER { .locked = 0 }
+
 static inline void spin_lock_init(spinlock_t *lock) {
     lock->locked = 0;
 }

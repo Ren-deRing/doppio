@@ -35,13 +35,15 @@ void test_entry(void) {
     while(1) {
         f += 0.1;
         dprintf("A(%.1f) ", f);
-        
+
         if (f > 10.0) f = 0.0;
-        schedule();
+        thread_sleep(500);
     }
 }
 
 void generic_entry() {
+    arch_irq_disable();
+
     early_init(g_boot_info.smp.bsp_hw_id);
     do_initcalls();
 
@@ -67,19 +69,14 @@ void generic_entry() {
         }
     }
 
-    thread_create(curthread->t_proc, 1, test_entry);
-    sched_enqueue(curthread);
+    struct thread* tA = thread_create(curthread->t_proc, 1, test_entry);
+    sched_enqueue(tA);
 
     arch_irq_enable();
 
-    double g = 100.0;
-    
     while(1) {
-        g += 0.5;
-        dprintf("B(%.1f) ", g);
-
-        if (g > 110.0) g = 100.0;
-        schedule();
+        arch_irq_enable();
+        arch_halt();
     }
 }
 

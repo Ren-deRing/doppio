@@ -4,6 +4,7 @@
 
 #include <uapi/types.h>
 
+extern uint8_t g_fpu_preset[4096];
 extern size_t g_xsave_size;
 
 static inline void cpuid(uint32_t leaf, uint32_t subleaf,

@@ -84,6 +84,36 @@ isr_common_stub:
     movq %rsp, %rdi
     call isr_handler
 
+    movq %gs:8, %rax
+    testq %rax, %rax
+    jz .restore_and_exit
+
+    cmpb $1, 64(%rax)
+    jne .restore_and_exit
+
+    # flag clear
+    movb $0, 64(%rax)
+
+    movq %rsp, 24(%rax)
+
+    movq 32(%rax), %rcx
+    movl $0xFFFFFFFF, %eax
+    movl $0xFFFFFFFF, %edx
+    xsaveopt (%rcx)
+
+    call pick_next_thread
+
+    movq %rax, %gs:8
+    movq %rax, %rsi    # rsi = next
+
+    movq 24(%rsi), %rsp
+
+    movq 32(%rsi), %rcx
+    movl $0xFFFFFFFF, %eax
+    movl $0xFFFFFFFF, %edx
+    xrstor (%rcx)
+
+.restore_and_exit:
     popq %r15
     popq %r14
     popq %r13

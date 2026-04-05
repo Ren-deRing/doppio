@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include <kernel/proc.h>
+
 #define MAX_CPUS 64
 #define MAX_ISO 256
 
@@ -15,8 +17,8 @@ typedef uint64_t cpu_status_t;
 
 struct cpu {
     struct cpu *self;
-//    struct task *current;   // running task
-//    struct task *idle;      // idle task
+    struct thread *current;   // running task
+    struct thread *idle;      // idle task
     uint32_t id;
     uint32_t hw_id;
 
@@ -38,6 +40,14 @@ void arch_pause(void);
 void arch_irq_disable(void);
 void arch_irq_enable(void);
 struct cpu* get_this_core(void);
+
+void arch_timer_handler(struct registers *regs, void *data);
+void arch_thread_setup(struct thread *t, void (*entry)(void));
+struct thread* arch_init_first_thread(void);
+void arch_set_current_thread(struct thread *t);
+struct thread* arch_get_idle_thread(void);
+uint64_t arch_get_system_ticks(void);
+void arch_request_resched(void);
 
 #define this_core          get_this_core()
 #define irq_save(flags)    do { flags = arch_irq_save(); } while(0)

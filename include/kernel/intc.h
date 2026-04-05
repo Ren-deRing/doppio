@@ -22,6 +22,8 @@ struct interrupt_controller {
     void (*mask)(uint8_t irq);
     void (*unmask)(uint8_t irq);
 
+    void (*start_timer)(uint32_t ms, uint8_t vector);
+
     // TODO: MSI
 };
 

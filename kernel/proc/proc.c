@@ -39,10 +39,10 @@ struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void)) {
     t->t_tid = tid;
     t->t_proc = p;
     t->t_state = 0; // READY
+    t->t_ticks = 0;
+    t->t_need_resched = false;
 
     arch_thread_setup(t, entry);
-
-    sched_enqueue(t);
     
     return t;
 }

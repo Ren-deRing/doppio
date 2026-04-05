@@ -1,6 +1,7 @@
 #pragma once
 
 #include <uapi/types.h>
+#include <stdbool.h>
 
 #include <kernel/fs/file.h>
 #include <kernel/lock.h>
@@ -32,6 +33,12 @@ struct thread {
     
     struct thread  *t_next;     /* 스레드 리스트 */
     struct thread  *t_sched_next;
+
+    bool            t_need_resched;
+    uint32_t        t_ticks;
+
+    // Safe to edit
+    uint64_t        t_sleep_until;
 };
 
 // PCB

@@ -1,7 +1,17 @@
 #pragma once
 
-extern void context_switch(struct thread *prev, struct thread *next);
+#include <stdint.h>
+#include <stdbool.h>
 
+struct thread;
+
+void scheduler_init(void);
+void schedule(void);
+void thread_yield(void);
+void thread_sleep(uint64_t ms);
+void sched_tick(void);
+struct thread* pick_next_thread(void);
 void sched_enqueue(struct thread *t);
 struct thread* sched_dequeue(void);
-void schedule(void);
+
+extern volatile uint64_t g_ticks;

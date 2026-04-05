@@ -30,6 +30,21 @@ static inline uint32_t lapic_read(uint32_t reg) {
     return *(volatile uint32_t*)(acpi_info.lapic_addr + reg);
 }
 
+void x86_lapic_set_periodic(uint32_t ms, uint8_t vector) {
+    struct cpu* core = get_this_core();
+    if (!core || !core->timer_ready) return;
+
+    lapic_write(LAPIC_TDCR, 0x03);
+    lapic_write(LAPIC_LVT_TIMER, vector | (1 << 17));
+
+    lapic_write(LAPIC_TICR, core->timer_ticks_per_ms * ms);
+
+    for(volatile int i=0; i<1000; i++); 
+    if (lapic_read(LAPIC_TCCR) == lapic_read(LAPIC_TICR)) {
+        dprintf("Error: LAPIC Timer is NOT counting!\n");
+    }
+}
+
 // Calibrate
 void x86_lapic_calibrate_timer(void) {
     struct cpu* core = this_core;
@@ -99,7 +114,8 @@ static struct interrupt_controller x86_intc = {
     .eoi = x86_lapic_eoi,
     .map_irq = x86_intc_map_irq, 
     .mask = x86_intc_mask,
-    .unmask = x86_intc_unmask
+    .unmask = x86_intc_unmask,
+    .start_timer = x86_lapic_set_periodic,
 };
 
 void lapic_controller_init(void) {

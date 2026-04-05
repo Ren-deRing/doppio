@@ -61,6 +61,10 @@ void xsave_init(void) {
 
     cpuid(0xD, 0, &eax, &ebx, &ecx, &edx);
     g_xsave_size = ebx;
+
+    eax = 0xFFFFFFFF;
+    edx = 0xFFFFFFFF;
+    asm volatile ("xsave %0" : : "m"(g_fpu_preset), "a"(eax), "d"(edx) : "memory");
 }
 
 void cpu_init(uint32_t logic_id, uint32_t hw_id) {

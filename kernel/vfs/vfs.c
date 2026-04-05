@@ -214,7 +214,7 @@ int vfs_open(const char *path, int flags, mode_t mode, int *fd_out) {
             }
         }
         
-        vput(dvp); // グッバイ! 君の運命のヒトは僕じゃない!
+        vput(dvp); // グッバイ! 君の運命のヒトは僕じゃない
         if (err != 0) return err;
     } else if (err != 0) {
         return err;

@@ -41,13 +41,9 @@ void test_entry(void) {
     }
 }
 
-#include "arch/x86_64/x86.h"
-
 void generic_entry() {
     early_init(g_boot_info.smp.bsp_hw_id);
     do_initcalls();
-
-    dprintf("x86: XSAVE/AVX enabled. Context size: %u bytes\n", g_xsave_size);
 
     ap_release = true;
     __sync_synchronize();

@@ -1,12 +1,14 @@
-#include "boot/bootinfo.h"
+#include <boot/bootinfo.h>
 
-#include "kernel/init.h"
-#include "kernel/cpu.h"
-#include "kernel/printf.h"
-#include "kernel/mmu.h"
-#include "kernel/kmem.h"
-#include "kernel/intc.h"
-#include "kernel/clock.h"
+#include <kernel/init.h>
+#include <kernel/cpu.h>
+#include <kernel/printf.h>
+#include <kernel/mmu.h>
+#include <kernel/kmem.h>
+#include <kernel/intc.h>
+#include <kernel/clock.h>
+#include <kernel/proc.h>
+#include <kernel/sched.h>
 
 #include "string.h"
 
@@ -28,9 +30,24 @@ void do_ap_initcalls(void) {
     }
 }
 
+void test_entry(void) {
+    double f = 0.0;
+    while(1) {
+        f += 0.1;
+        dprintf("A(%.1f) ", f);
+        
+        if (f > 10.0) f = 0.0;
+        schedule();
+    }
+}
+
+#include "arch/x86_64/x86.h"
+
 void generic_entry() {
     early_init(g_boot_info.smp.bsp_hw_id);
     do_initcalls();
+
+    dprintf("x86: XSAVE/AVX enabled. Context size: %u bytes\n", g_xsave_size);
 
     ap_release = true;
     __sync_synchronize();
@@ -54,9 +71,20 @@ void generic_entry() {
         }
     }
 
+    thread_create(curthread->t_proc, 1, test_entry);
+    sched_enqueue(curthread);
+
     arch_irq_enable();
 
-    for (;;) arch_halt();
+    double g = 100.0;
+    
+    while(1) {
+        g += 0.5;
+        dprintf("B(%.1f) ", g);
+
+        if (g > 110.0) g = 100.0;
+        schedule();
+    }
 }
 
 void ap_entry(CoreInfo* info) {

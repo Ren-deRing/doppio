@@ -9,7 +9,9 @@
 #define KMEM_NUM_CLASSES 16
 
 struct kmem_magazine;
-typedef struct kmem_magazine kmem_magazine_t; // TODO
+typedef struct kmem_magazine kmem_magazine_t;
+
+typedef uint64_t cpu_status_t;
 
 struct cpu {
     struct cpu *self;
@@ -23,8 +25,6 @@ struct cpu {
 
     kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
-
-typedef uint64_t cpu_status_t;
 
 struct registers;
 typedef void (*handler_t)(struct registers *regs, void *data);
@@ -44,3 +44,17 @@ struct cpu* get_this_core(void);
 #define irq_restore(flags) arch_irq_restore(flags)
 #define irq_enable(void)   arch_irq_enable();
 #define irq_disable(void)  arch_irq_disable();
+
+static inline uintptr_t get_stack_pointer(void) {
+    uintptr_t sp;
+#if defined(__x86_64__)
+    asm volatile("mov %%rsp, %0" : "=r"(sp));
+#elif defined(__aarch64__)
+    asm volatile("mov %0, sp" : "=r"(sp));
+#endif
+    return sp;
+}
+
+#include <kernel/proc.h>
+
+void arch_thread_setup(struct thread *t, void (*entry)(void));

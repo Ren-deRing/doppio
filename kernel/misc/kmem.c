@@ -316,4 +316,23 @@ void* kcalloc(size_t nmemb, size_t size) {
     return ptr;
 }
 
+void* kmalloc_aligned(size_t size, size_t alignment) {
+    size_t total_size = size + alignment + sizeof(void*);
+    void* raw = kmalloc(total_size);
+    if (!raw) return NULL;
+
+    uintptr_t addr = (uintptr_t)raw + sizeof(void*);
+    void* aligned = (void*)((addr + alignment - 1) & ~(alignment - 1));
+
+    ((void**)aligned)[-1] = raw;
+
+    return aligned;
+}
+
+void kfree_aligned(void* ptr) {
+    if (!ptr) return;
+    void* raw = ((void**)ptr)[-1];
+    kfree(raw);
+}
+
 mem_initcall(kmem_init, PRIO_LAST);

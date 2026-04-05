@@ -34,6 +34,33 @@ void fpu_init(void) {
     asm volatile ("mov %0, %%cr4" : : "r"(cr4));
 
     asm volatile ("fninit");
+
+    uint32_t mxcsr = 0x1F80;
+    asm volatile ("ldmxcsr %0" : : "m"(mxcsr));
+}
+
+void xsave_init(void) {
+    uint32_t eax, ebx, ecx, edx;
+    uintptr_t cr4;
+
+    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
+    if (!(ecx & (1 << 26))) return; 
+
+    asm volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1 << 18); // OSXSAVE
+    asm volatile ("mov %0, %%cr4" : : "r"(cr4));
+
+    // Bit 0: x87, Bit 1: SSE, Bit 2: AVX
+    uint64_t xcr0 = (1 << 0) | (1 << 1); 
+    
+    if (ecx & (1 << 28)) { // CPUID.1:ECX.AVX[bit 28]
+        xcr0 |= (1 << 2);
+    }
+
+    xsetbv(0, xcr0);
+
+    cpuid(0xD, 0, &eax, &ebx, &ecx, &edx);
+    g_xsave_size = ebx;
 }
 
 void cpu_init(uint32_t logic_id, uint32_t hw_id) {
@@ -68,6 +95,7 @@ void early_init(uint32_t hw_id) {
     fpu_init();
     cpu_init(0, hw_id);
     log_init();
+    xsave_init();
 }
 
 static volatile int next_id = 1;
@@ -75,6 +103,7 @@ static volatile int next_id = 1;
 void ap_early_init(uint32_t hw_id) {
     int id = __sync_fetch_and_add(&next_id, 1); 
 
+    xsave_init();
     fpu_init();
     cpu_init(id, hw_id);
 }

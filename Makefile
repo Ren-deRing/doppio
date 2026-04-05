@@ -88,7 +88,7 @@ run: iso
 		-cdrom $(ISO_IMAGE) \
 		-m 8G \
 		-bios /usr/share/ovmf/OVMF.fd \
-		-serial stdio -d int -smp 4 -machine q35
+		-serial stdio -d int -smp 4 -machine q35 -cpu host -accel kvm
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)

@@ -1,4 +1,14 @@
 #include <kernel/cpu.h>
+#include <kernel/proc.h>
+#include <kernel/kmem.h>
+
+#include <uapi/types.h>
+
+#include "x86.h"
+
+#include <string.h>
+
+size_t g_xsave_size = 512;
 
 cpu_status_t arch_irq_save(void) {
     cpu_status_t flags;
@@ -34,28 +44,24 @@ struct cpu* get_this_core(void) {
 
 // x86
 
-void wrmsr(uint32_t msr, uint64_t val) {
-    uint32_t low = (uint32_t)val;
-    uint32_t high = (uint32_t)(val >> 32);
+void arch_thread_setup(struct thread *t, void (*entry)(void)) {
+    t->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
+    if (t->t_arch_data) memset(t->t_arch_data, 0, g_xsave_size);
 
-    asm volatile (
-        "wrmsr"
-        :
-        : "c"(msr),
-          "a"(low),
-          "d"(high)
-        : "memory"
-    );
-}
+    uint32_t *mxcsr_ptr = (uint32_t *)((uint8_t *)t->t_arch_data + 24);
+    *mxcsr_ptr = 0x1F80;
 
-uint64_t rdmsr(uint32_t msr) {
-    uint32_t low, high;
+    uintptr_t stack_top = (uintptr_t)t->t_kstack + KSTACK_SIZE;
+    
+    uint64_t *sp = (uint64_t *)(stack_top & ~0xFULL);
 
-    asm volatile (
-        "rdmsr"
-        : "=a"(low), "=d"(high)
-        : "c"(msr)
-    );
+    *(--sp) = 0; 
 
-    return ((uint64_t)high << 32) | low;
+    *(--sp) = (uint64_t)entry;
+
+    for (int i = 0; i < 6; i++) {
+        *(--sp) = 0;
+    }
+
+    t->t_context = (void *)sp;
 }

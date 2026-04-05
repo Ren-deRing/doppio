@@ -34,7 +34,7 @@ void vfs_init(void) {
     g_root_vnode->ops->mkdir(g_root_vnode, "etc", 0755);
 
     struct proc *p = proc_create(1);
-    struct thread *t = thread_create(p, 1);
+    struct thread *t = thread_create(p, 1, NULL);
     curthread = t;
     
     vref(g_root_vnode);

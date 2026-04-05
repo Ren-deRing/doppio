@@ -8,6 +8,7 @@
 
 #include <kernel/kmem.h>
 #include <kernel/init.h>
+#include <kernel/cpu.h>
 #include <kernel/lock.h>
 
 #include <string.h>

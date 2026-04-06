@@ -81,11 +81,9 @@ void generic_entry() {
     uint32_t height = g_boot_info.fb.height;
     uint32_t pixels_per_line = g_boot_info.fb.pitch / 4;
 
-    uint32_t test_color = 0x0077BE; 
-
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
-            fb_ptr[y * pixels_per_line + x] = test_color;
+            fb_ptr[y * pixels_per_line + x] = 0xF3E0ED;
         }
     }
 

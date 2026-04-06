@@ -61,7 +61,7 @@ void arch_thread_setup(struct thread *t, void (*entry)(void)) {
     *(--sp) = 0;
 
     *(--sp) = 0x10;              // SS
-    *(--sp) = (uintptr_t)sp + 8; // RSP
+    *(--sp) = (uintptr_t)sp;     // RSP
     *(--sp) = 0x202;             // RFLAGS
     *(--sp) = 0x08;              // CS
     *(--sp) = (uintptr_t)entry;  // RIP
@@ -69,9 +69,21 @@ void arch_thread_setup(struct thread *t, void (*entry)(void)) {
     *(--sp) = 0; // Error Code
     *(--sp) = 0; // Vector
 
-    for (int i = 0; i < 15; i++) {
-        *(--sp) = 0;
-    }
+    *(--sp) = 0;                   // RAX
+    *(--sp) = 0;                   // RBX
+    *(--sp) = 0;                   // RCX
+    *(--sp) = 0;                   // RDX
+    *(--sp) = 0;                   // RSI
+    *(--sp) = (uintptr_t)t->t_arg; // RDI (첫 번째 인자)
+    *(--sp) = 0;                   // RBP
+    *(--sp) = 0;                   // R8
+    *(--sp) = 0;                   // R9
+    *(--sp) = 0;                   // R10
+    *(--sp) = 0;                   // R11
+    *(--sp) = 0;                   // R12
+    *(--sp) = 0;                   // R13
+    *(--sp) = 0;                   // R14
+    *(--sp) = 0;                   // R15
 
     t->t_context = sp;
 }

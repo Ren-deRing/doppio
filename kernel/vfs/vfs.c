@@ -13,6 +13,7 @@
 #include <kernel/init.h>
 #include <kernel/printf.h>
 #include <kernel/proc.h>
+#include <kernel/cpu.h>
 
 #include <uapi/fcntl.h>
 #include <uapi/errno.h>
@@ -33,9 +34,8 @@ void vfs_init(void) {
     g_root_vnode->ops->mkdir(g_root_vnode, "bin", 0755);
     g_root_vnode->ops->mkdir(g_root_vnode, "etc", 0755);
 
-    struct proc *p = proc_create(1);
-    struct thread *t = thread_create(p, 1, NULL);
-    curthread = t;
+    struct proc *p = this_core->current->t_proc;
+    struct thread *t = this_core->current;
     
     vref(g_root_vnode);
     p->p_cwd = g_root_vnode;

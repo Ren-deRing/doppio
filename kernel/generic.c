@@ -9,6 +9,7 @@
 #include <kernel/clock.h>
 #include <kernel/proc.h>
 #include <kernel/sched.h>
+#include <kernel/lock.h>
 
 #include "string.h"
 
@@ -30,7 +31,32 @@ void do_ap_initcalls(void) {
     }
 }
 
-void test_entry(void) {
+mutex_t test_mutex;
+volatile int shared_counter = 0;
+
+void mutex_test_thread(void* arg) {
+    const char* name = (const char*)arg;
+    
+    for (int i = 0; i < 5; i++) {
+        dprintf("\n[%s] Locking mutex...\n", name);
+        mutex_lock(&test_mutex);
+        
+        dprintf("[%s] Counter: %d\n", name, ++shared_counter);
+        dprintf("[%s] Anyway, this is critical code\n", name);
+
+        thread_sleep(1000);
+        
+        dprintf("[%s] Unlocking mutex...\n", name);
+        mutex_unlock(&test_mutex);
+        
+        thread_yield(); 
+    }
+    
+    dprintf("\n[%s] Test Finished!\n", name);
+    for(;;) arch_halt();
+}
+
+void test_thread(void) {
     double f = 0.0;
     while(1) {
         f += 0.1;
@@ -69,12 +95,21 @@ void generic_entry() {
         }
     }
 
-    struct thread* tA = thread_create(curthread->t_proc, 1, test_entry);
-    sched_enqueue(tA);
+    // struct thread* tA = thread_create(curthread->t_proc, 1, test_thread, NULL);
+    // sched_enqueue(tA);
+
+    mutex_init(&test_mutex);
+    shared_counter = 0;
+
+    struct thread* t1 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_1");
+    struct thread* t2 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_2");
+
+    sched_enqueue(t1);
+    sched_enqueue(t2);
 
     arch_irq_enable();
 
-    while(1) {
+    while(1) { // idle
         arch_irq_enable();
         arch_halt();
     }

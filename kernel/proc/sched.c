@@ -133,4 +133,4 @@ void scheduler_init(void) {
     g_intc->start_timer(1, 0x40);
 }
 
-subsys_initcall(scheduler_init, PRIO_LAST);
+dev_initcall(scheduler_init, PRIO_LAST);

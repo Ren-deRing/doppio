@@ -24,7 +24,7 @@ struct proc* proc_create(pid_t pid) {
     return p;
 }
 
-struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void)) {
+struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void), void *arg) {
     struct thread *t = kmalloc(sizeof(struct thread));
     if (!t) return NULL;
 
@@ -40,6 +40,7 @@ struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void)) {
     t->t_proc = p;
     t->t_state = 0; // READY
     t->t_ticks = 0;
+    t->t_arg = arg;
     t->t_need_resched = false;
 
     arch_thread_setup(t, entry);

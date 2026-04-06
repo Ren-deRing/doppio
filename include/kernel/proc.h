@@ -13,7 +13,8 @@ typedef enum {
     THREAD_EMBRYO,  // what?
     THREAD_READY,   // ready to work
     THREAD_RUNNING, // 
-    THREAD_SLEEP,   // 
+    THREAD_SLEEP,   //
+    THREAD_WAITING, 
     THREAD_ZOMBIE   // holy god call init
 } thread_state_t;
 
@@ -22,23 +23,27 @@ struct vnode;
 
 // TCB
 struct thread {
-    tid_t           t_tid;
-    struct proc    *t_proc;     /* 소속 프로세스 */
+    tid_t            t_tid;
+    struct proc     *t_proc;     /* 소속 프로세스 */
     
-    void           *t_kstack;   /* 커널 스택 바닥 */
-    void           *t_context;  /* 레지스터 컨텍스트 */
-    void           *t_arch_data;/* 알아서 써라 */
+    void            *t_kstack;   /* 커널 스택 바닥 */
+    void            *t_context;  /* 레지스터 컨텍스트 */
+    void            *t_arch_data;/* 알아서 써라 */
     
-    int             t_state;    /* 스레드 상태 */
+    int              t_state;    /* 스레드 상태 */
     
-    struct thread  *t_next;     /* 스레드 리스트 */
-    struct thread  *t_sched_next;
+    struct thread   *t_next;     /* 스레드 리스트 */
+    struct thread   *t_sched_next;
 
-    bool            t_need_resched;
-    uint32_t        t_ticks;
+    bool             t_need_resched;
+    uint32_t         t_ticks;
 
     // Safe to edit
-    uint64_t        t_sleep_until;
+    uint64_t         t_sleep_until;
+    struct list_node t_wait_node;
+    spinlock_t      *t_lock_to_release;
+
+    void            *t_arg;
 };
 
 // PCB
@@ -57,6 +62,6 @@ extern struct thread *curthread;
 #define curproc (curthread ? curthread->t_proc : NULL)
 
 struct proc* proc_create(pid_t pid);
-struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void));
+struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void), void *arg);
 
 int proc_alloc_fd(struct proc *p, struct file *f);

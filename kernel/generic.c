@@ -31,41 +31,34 @@ void do_ap_initcalls(void) {
     }
 }
 
-mutex_t test_mutex;
-volatile int shared_counter = 0;
+// mutex_t test_mutex;
+// volatile int shared_counter = 0;
 
-void mutex_test_thread(void* arg) {
-    const char* name = (const char*)arg;
+// void mutex_test_thread(void* arg) {
+//     const char* name = (const char*)arg;
     
-    for (int i = 0; i < 5; i++) {
-        dprintf("\n[%s] Locking mutex...\n", name);
-        mutex_lock(&test_mutex);
+//     for (int i = 0; i < 5; i++) {
+//         dprintf("\n[%s] Locking mutex...\n", name);
+//         mutex_lock(&test_mutex);
         
-        dprintf("[%s] Counter: %d\n", name, ++shared_counter);
-        dprintf("[%s] Anyway, this is critical code\n", name);
+//         dprintf("[%s] Counter: %d\n", name, ++shared_counter);
+//         dprintf("[%s] Anyway, this is critical code\n", name);
 
-        thread_sleep(1000);
+//         thread_sleep(1000);
         
-        dprintf("[%s] Unlocking mutex...\n", name);
-        mutex_unlock(&test_mutex);
+//         dprintf("[%s] Unlocking mutex...\n", name);
+//         mutex_unlock(&test_mutex);
         
-        thread_yield(); 
-    }
+//         thread_yield(); 
+//     }
     
-    dprintf("\n[%s] Test Finished!\n", name);
-    for(;;) arch_halt();
-}
+//     dprintf("\n[%s] Test Finished!\n", name);
+//     for(;;) arch_halt();
+// }
 
-void test_thread(void) {
-    double f = 0.0;
-    while(1) {
-        f += 0.1;
-        dprintf("A(%.1f) ", f);
-
-        if (f > 10.0) f = 0.0;
-        thread_sleep(500);
-    }
-}
+#include <kernel/exec.h>
+#include <kernel/fs/vfs.h>
+#include <uapi/fcntl.h>
 
 void generic_entry() {
     arch_irq_disable();
@@ -93,17 +86,52 @@ void generic_entry() {
         }
     }
 
-    // struct thread* tA = thread_create(curthread->t_proc, 1, test_thread, NULL);
-    // sched_enqueue(tA);
+    // mutex_init(&test_mutex);
+    // shared_counter = 0;
 
-    mutex_init(&test_mutex);
-    shared_counter = 0;
+    // struct thread* t1 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_1");
+    // struct thread* t2 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_2");
 
-    struct thread* t1 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_1");
-    struct thread* t2 = thread_create(curthread->t_proc, 1, (void*)mutex_test_thread, "Mika_2");
+    // sched_enqueue(t1);
+    // sched_enqueue(t2);
 
-    sched_enqueue(t1);
-    sched_enqueue(t2);
+    int fd;
+    if (vfs_open("/bin/init", O_RDONLY, 0, &fd) == 0) {
+        off_t size = vfs_lseek(fd, 0, SEEK_END);
+        vfs_lseek(fd, 0, SEEK_SET);
+
+        if (size > 0) {
+            void* elf_buf = kmalloc(size);
+            if (elf_buf) {
+                vfs_read(fd, elf_buf, size);
+                vfs_close(fd);
+
+                dprintf("Loading /bin/init (%d bytes)...\n", (int)size);
+
+                int err = proc_exec(curthread->t_proc, elf_buf);
+                
+                if (err == 0) {
+                    curthread->t_flags |= THREAD_FLAG_USER;
+                    
+                    arch_thread_setup(curthread, (void*)curthread->t_proc->p_entry);
+                    arch_switch_context_hardware(curthread);
+
+                    dprintf("Switching to User Mode...\n");
+
+                    dprintf("Entering User Mode...\n");
+                    dprintf("  RIP: 0x%lx\n", curthread->t_proc->p_entry);
+                    dprintf("  RSP: 0x%lx\n", curthread->t_proc->p_stack_top);
+
+                    extern void arch_enter_user_mode(void* context);
+                    arch_enter_user_mode(curthread->t_context);
+                    
+                }
+                kfree(elf_buf);
+            }
+        }
+    } else {
+        dprintf("Error: Cannot find /bin/init\n");
+    }
 
     arch_irq_enable();
 
@@ -125,7 +153,7 @@ void ap_entry(CoreInfo* info) {
     __sync_synchronize();
     do_ap_initcalls();
 
-    arch_irq_enable();
+    // arch_irq_enable();
 
     // atomic_inc(&initialized_cores);
 

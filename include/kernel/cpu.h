@@ -25,6 +25,8 @@ struct cpu {
     uint64_t timer_ticks_per_ms; 
     bool timer_ready;
 
+    void *arch_cpu_data;
+
     kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
 
@@ -48,6 +50,11 @@ void arch_set_current_thread(struct thread *t);
 struct thread* arch_get_idle_thread(void);
 uint64_t arch_get_system_ticks(void);
 void arch_request_resched(void);
+int arch_proc_init(struct proc *p);
+void arch_proc_destroy(struct proc *p);
+int arch_thread_init(struct thread *t, void (*entry)(void));
+void arch_thread_destroy(struct thread *t);
+void arch_switch_context_hardware(struct thread *next);
 
 #define this_core          get_this_core()
 #define irq_save(flags)    do { flags = arch_irq_save(); } while(0)

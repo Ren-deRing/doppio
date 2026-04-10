@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: 0BSD
  */
 
+#include <boot/bootinfo.h>
+
 #include <kernel/fs/vfs.h>
 #include <kernel/fs/ramfs.h>
 #include <kernel/fs/vnode.h>
@@ -34,96 +36,55 @@ void vfs_init(void) {
     g_root_vnode->ops->mkdir(g_root_vnode, "bin", 0755);
     g_root_vnode->ops->mkdir(g_root_vnode, "etc", 0755);
 
-    struct proc *p = this_core->current->t_proc;
-    struct thread *t = this_core->current;
-    
-    vref(g_root_vnode);
-    p->p_cwd = g_root_vnode;
-
-    dprintf("VFS: Starting integration test...\n");
+    if (g_boot_info.initrd.virt_base) {
+        vfs_load_initrd(g_boot_info.initrd.virt_base, g_boot_info.initrd.size);
+    }
 
     int fd;
     int err;
 
-    err = vfs_open("/bin", O_RDONLY, 0, &fd);
+    err = vfs_open("/etc/hostname", O_RDONLY, 0, &fd);
     if (err == 0) {
-        dprintf("VFS Test: Successfully opened /bin (FD: %d)\n", fd);
-        vfs_close(fd);
-    } else {
-        dprintf("VFS Test: Failed to open /bin (Error: %d)\n", err);
-    }
-
-    err = vfs_open("/etc/hostname", O_CREAT | O_RDWR, 0644, &fd);
-    if (err == 0) {
-        dprintf("VFS Test: Created /etc/hostname (FD: %d)\n", fd);
-        
-        struct vnode *test_vn = NULL;
-        if (vfs_lookup("/etc/hostname", p->p_cwd, &test_vn) == 0) {
-            dprintf("VFS Test: Verification passed! /etc/hostname exists (vnode: %p)\n", test_vn);
-            vput(test_vn);
-        }
-        
-        vfs_close(fd);
-    } else {
-        dprintf("VFS Test: Failed to create /etc/hostname (Error: %d)\n", err);
-    }
-
-    err = vfs_open("/etc/hostname", O_CREAT | O_RDWR, 0644, &fd);
-    if (err == 0) {
-        const char *msg = "Misono Mika!";
-        vfs_write(fd, msg, strlen(msg));
-        dprintf("VFS: Wrote hostname!\n");
-        vfs_close(fd);
-
-        char buf[32] = {0};
-        vfs_open("/etc/hostname", O_RDONLY, 0, &fd);
+        char buf[64] = {0};
         int n = vfs_read(fd, buf, sizeof(buf) - 1);
-        dprintf("VFS: Read back [%s] (%d bytes)\n", buf, n);
-        vfs_close(fd);
-    }
-
-    err = vfs_open("/etc/hostname", O_RDWR, 0, &fd);
-    if (err == 0) {
-        vfs_lseek(fd, 7, SEEK_SET); // "Misono " 다음 위치로 이동
-        vfs_write(fd, "Mika~!", 6); // "Misono Mika~!" 로 변경됨
-        
-        vfs_lseek(fd, -1, SEEK_CUR); // '!' 위치로 이동
-        vfs_write(fd, "?", 1);       // "Misono Mika~?" 로 변경됨
-        
-        vfs_lseek(fd, 0, SEEK_END);
-        vfs_write(fd, " [v0.1]", 7); // "Misono Mika~? [v0.1]"
-
-        vfs_lseek(fd, 0, SEEK_SET);
-        char final_buf[64] = {0};
-        int bytes = vfs_read(fd, final_buf, sizeof(final_buf) - 1);
-        
-        dprintf("VFS Test: [%s] (%d bytes)\n", final_buf, bytes);
-        
+        dprintf("VFS Test: /etc/hostname content: [%s] (%d bytes)\n", buf, n);
         vfs_close(fd);
     } else {
-        dprintf("VFS Test: Failed to re-open for LSEEK (Error: %d)\n", err);
+        dprintf("VFS Test: Failed to open /etc/hostname (Error: %d)\n", err);
     }
 
     int dir_fd;
-    if (vfs_open("/etc", O_RDONLY, 0, &dir_fd) == 0) {
+    if (vfs_open("/bin", O_RDONLY, 0, &dir_fd) == 0) {
         char dir_buf[512];
         int bytes_read;
+        dprintf("VFS Test: Listing contents of /bin:\n");
 
         while ((bytes_read = vfs_readdir(dir_fd, dir_buf, sizeof(dir_buf))) > 0) {
             struct dirent *de = (struct dirent *)dir_buf;
+            const char *type_str = (de->d_type == DT_DIR) ? "DIR " : "FILE";
+            dprintf("  [%s] Name: %s\n", type_str, de->d_name);
             
-            const char *type_str = (de->d_type == DT_DIR) ? "DIR" : "FILE";
-            dprintf("  [%s] Name: %s, Ino: %lx, Reclen: %d\n", 
-                    type_str, de->d_name, de->d_ino, de->d_reclen);
+            break;
         }
-
-        if (bytes_read < 0) {
-            dprintf("VFS Test: Readdir failed (Error: %d)\n", bytes_read);
-        }
-
         vfs_close(dir_fd);
     } else {
-        dprintf("VFS Test: Failed to open /etc for readdir\n");
+        dprintf("VFS Test: Failed to open /bin for readdir\n");
+    }
+
+    err = vfs_open("/bin/init", O_RDONLY, 0, &fd);
+    if (err == 0) {
+        unsigned char elf_magic[4];
+        vfs_read(fd, elf_magic, 4);
+        if (elf_magic[0] == 0x7F && elf_magic[1] == 'E' && 
+            elf_magic[2] == 'L' && elf_magic[3] == 'F') {
+            dprintf("VFS Test: /bin/init is a valid ELF file!\n");
+        } else {
+            dprintf("VFS Test: /bin/init found, but NOT a valid ELF (Magic: %02x %02x %02x %02x)\n",
+                    elf_magic[0], elf_magic[1], elf_magic[2], elf_magic[3]);
+        }
+        vfs_close(fd);
+    } else {
+        dprintf("VFS Test: /bin/init NOT found (Error: %d)\n", err);
     }
 }
 
@@ -315,6 +276,41 @@ int vfs_readdir(int fd, void *buf, size_t count) {
     int n = vp->ops->readdir(vp, buf, count, &f->f_pos);
     
     return n;
+}
+
+int vfs_mkdir(const char *path, mode_t mode) {
+    if (!curthread || !curthread->t_proc) return -ESRCH;
+    struct proc *p = curthread->t_proc;
+
+    char parent_path[256];
+    char child_name[256];
+    
+    const char *last_slash = strrchr(path, '/');
+    if (!last_slash) {
+        strcpy(parent_path, ".");
+        strcpy(child_name, path);
+    } else if (last_slash == path) {
+        strcpy(parent_path, "/");
+        strcpy(child_name, path + 1);
+    } else {
+        size_t len = last_slash - path;
+        strncpy(parent_path, path, len);
+        parent_path[len] = '\0';
+        strcpy(child_name, last_slash + 1);
+    }
+
+    struct vnode *dvp = NULL;
+    int err = vfs_lookup(parent_path, p->p_cwd, &dvp);
+    if (err != 0) return err;
+
+    if (dvp->ops->mkdir) {
+        err = dvp->ops->mkdir(dvp, child_name, mode);
+    } else {
+        err = -ENOTSUP;
+    }
+
+    vput(dvp);
+    return err;
 }
 
 subsys_initcall(vfs_init);

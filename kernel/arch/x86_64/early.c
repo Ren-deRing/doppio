@@ -11,6 +11,12 @@
 #include <kernel/printf.h>
 
 #define MSR_GS_BASE 0xC0000101
+#define MSR_KERNEL_GS_BASE 0xC0000102
+#define MSR_EFER 0xC0000080
+#define EFER_SCE (1ULL << 0)
+#define MSR_LSTAR 0xC0000082
+#define MSR_STAR  0xC0000081
+#define MSR_SFMASK 0xC0000084
 
 #define SERIAL_DEVICE 0x3F8
 
@@ -39,6 +45,21 @@ void fpu_init(void) {
     asm volatile ("ldmxcsr %0" : : "m"(mxcsr));
 }
 
+extern void syscall_entry(void);
+void syscall_init(void) {
+    uint64_t efer = rdmsr(MSR_EFER);
+    efer |= EFER_SCE;
+    wrmsr(MSR_EFER, efer);
+
+    wrmsr(MSR_LSTAR, (uintptr_t)syscall_entry);
+
+    uint64_t star = (uint64_t)0x08 << 32;
+    star |= (uint64_t)0x1B << 48;
+    wrmsr(MSR_STAR, star);
+
+    wrmsr(MSR_SFMASK, 0x200);
+}
+
 void xsave_init(void) {
     uint32_t eax, ebx, ecx, edx;
     uintptr_t cr4;
@@ -64,21 +85,31 @@ void xsave_init(void) {
 
     eax = 0xFFFFFFFF;
     edx = 0xFFFFFFFF;
-    asm volatile ("xsave %0" : : "m"(g_fpu_preset), "a"(eax), "d"(edx) : "memory");
+    asm volatile ("xsave (%0)" 
+              : 
+              : "r"(g_fpu_preset), "a"(eax), "d"(edx) 
+              : "memory");
 }
 
 void cpu_init(uint32_t logic_id, uint32_t hw_id) {
     struct cpu *c = &cpus[logic_id];
+    
+    struct x86_64_cpu_data *ad = &static_arch_data[logic_id];
+    
+    ad->kernel_stack = 0; 
+    ad->user_rsp = 0;
 
     c->self = c;
     c->id = logic_id;
     c->hw_id = hw_id;
+    c->arch_cpu_data = ad;
 
     for (int i = 0; i < KMEM_NUM_CLASSES; i++) {
         c->magazines[i] = NULL; 
     }
-
+    
     wrmsr(MSR_GS_BASE, (uintptr_t)c);
+    wrmsr(MSR_KERNEL_GS_BASE, (uintptr_t)c);
 }
 
 static char* log_write(const char* buffer, void* user, int size) {
@@ -100,6 +131,7 @@ void early_init(uint32_t hw_id) {
     cpu_init(0, hw_id);
     log_init();
     xsave_init();
+    syscall_init();
 }
 
 static volatile int next_id = 1;
@@ -107,8 +139,9 @@ static volatile int next_id = 1;
 void ap_early_init(uint32_t hw_id) {
     int id = __sync_fetch_and_add(&next_id, 1); 
 
-    xsave_init();
     fpu_init();
+    xsave_init();
+    syscall_init();
     cpu_init(id, hw_id);
 }
 

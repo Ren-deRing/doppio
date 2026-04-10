@@ -3,8 +3,10 @@
 #include <kernel/kmem.h>
 #include <kernel/sched.h>
 #include <kernel/intc.h>
+#include <kernel/mmu.h>
 
 #include <uapi/types.h>
+#include <uapi/errno.h>
 
 #include "x86.h"
 
@@ -50,21 +52,24 @@ struct cpu* get_this_core(void) {
 // x86
 
 void arch_thread_setup(struct thread *t, void (*entry)(void)) {
-    t->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
-    
-    if (t->t_arch_data) {
-        memcpy(t->t_arch_data, g_fpu_preset, g_xsave_size);
-    }
-
     uint64_t *sp = (uint64_t *)((uintptr_t)t->t_kstack + KSTACK_SIZE);
 
-    *(--sp) = 0;
+    bool is_user = (t->t_flags & THREAD_FLAG_USER);
 
-    *(--sp) = 0x10;              // SS
-    *(--sp) = (uintptr_t)sp;     // RSP
-    *(--sp) = 0x202;             // RFLAGS
-    *(--sp) = 0x08;              // CS
-    *(--sp) = (uintptr_t)entry;  // RIP
+    if (is_user) {
+        *(--sp) = 0x1B; // User
+        *(--sp) = t->t_user_stack_top;
+    } else {
+        *(--sp) = 0x10; // Kernel
+        *(--sp) = (uintptr_t)sp + 8;
+    }
+    *(--sp) = 0x202;               // RFLAGS
+    if (is_user) {
+        *(--sp) = 0x23; // User
+    } else {
+        *(--sp) = 0x08; // Kernel
+    }
+    *(--sp) = (uintptr_t)entry;    // RIP
 
     *(--sp) = 0; // Error Code
     *(--sp) = 0; // Vector
@@ -74,7 +79,7 @@ void arch_thread_setup(struct thread *t, void (*entry)(void)) {
     *(--sp) = 0;                   // RCX
     *(--sp) = 0;                   // RDX
     *(--sp) = 0;                   // RSI
-    *(--sp) = (uintptr_t)t->t_arg; // RDI (첫 번째 인자)
+    *(--sp) = (uintptr_t)t->t_arg; // RDI
     *(--sp) = 0;                   // RBP
     *(--sp) = 0;                   // R8
     *(--sp) = 0;                   // R9
@@ -86,6 +91,71 @@ void arch_thread_setup(struct thread *t, void (*entry)(void)) {
     *(--sp) = 0;                   // R15
 
     t->t_context = sp;
+}
+
+int arch_proc_init(struct proc *p) {
+    struct arch_proc *ap = kmalloc(sizeof(struct arch_proc));
+    if (!ap) return -ENOMEM;
+
+    memset(ap, 0, sizeof(struct arch_proc));
+    
+    p->p_arch = ap;
+    
+    return 0;
+}
+
+int arch_thread_init(struct thread *t, void (*entry)(void)) {
+    t->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
+    if (!t->t_arch_data) {
+        return -ENOMEM;
+    }
+
+    memset(t->t_arch_data, 0, g_xsave_size);
+    memcpy(t->t_arch_data, g_fpu_preset, g_xsave_size);
+    arch_thread_setup(t, entry);
+
+    return 0;
+}
+
+void arch_proc_destroy(struct proc *p) {
+    if (p->p_arch) {
+        if (p->p_arch->io_bitmap) {
+            kfree(p->p_arch->io_bitmap);
+        }
+        kfree(p->p_arch);
+        p->p_arch = NULL;
+    }
+}
+
+void arch_thread_destroy(struct thread *t) {
+    if (t->t_arch_data) {
+        kfree(t->t_arch_data);
+        t->t_arch_data = NULL;
+    }
+}
+
+extern void update_tss_rsp0(uintptr_t kstack_top);
+
+void arch_switch_context_hardware(struct thread *next) {
+    if (!next || !next->t_proc) return;
+
+    if (next->t_proc->p_vm_map) {
+        uintptr_t new_cr3 = v2p(next->t_proc->p_vm_map);
+        
+        uintptr_t old_cr3;
+        asm volatile("mov %%cr3, %0" : "=r"(old_cr3));
+        
+        if (old_cr3 != new_cr3) {
+            asm volatile("mov %0, %%cr3" : : "r"(new_cr3) : "memory");
+        }
+    }
+
+    uintptr_t kstack_top = (uintptr_t)next->t_kstack + KSTACK_SIZE;
+    update_tss_rsp0(kstack_top); 
+
+    struct cpu *c = get_this_core();
+    struct x86_64_cpu_data *ad = (struct x86_64_cpu_data *)c->arch_cpu_data;
+    ad->kernel_stack = kstack_top;
 }
 
 uint64_t arch_get_system_ticks(void) {
@@ -109,7 +179,7 @@ void arch_request_resched(void) {
 
 struct thread* arch_init_first_thread(void) {
     struct proc *p0 = proc_create(0);
-    struct thread *t0 = kmalloc(sizeof(struct thread));
+    struct thread *t0 = kmalloc_aligned(sizeof(struct thread), 64);
     memset(t0, 0, sizeof(struct thread));
 
     t0->t_tid = 0;

@@ -59,6 +59,13 @@ typedef struct {
         uint32_t  bsp_hw_id;
     } smp;
 
+    /* Initial RAM Disk */
+    struct {
+        uintptr_t phys_base;
+        uintptr_t virt_base;
+        uint64_t size;
+    } initrd;
+
     /* System Tables */
     uintptr_t rsdp_address;
 } BootInfo;

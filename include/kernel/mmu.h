@@ -57,3 +57,6 @@ page_t* phys_to_page(uint64_t phys);
 
 page_table_t* mmu_get_active_map(void);
 page_table_t* mmu_get_kernel_map(void);
+
+page_table_t* mmu_create_map(void);
+void mmu_destroy_map(page_table_t* map);

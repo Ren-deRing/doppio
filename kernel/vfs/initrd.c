@@ -1,0 +1,78 @@
+#include <boot/bootinfo.h>
+
+#include <kernel/fs/vfs.h>
+#include <kernel/printf.h>
+
+#include <uapi/fcntl.h>
+
+#include <string.h>
+
+struct cpio_header {
+    char c_magic[6];    // 070701
+    char c_ino[8];
+    char c_mode[8];
+    char c_uid[8];
+    char c_gid[8];
+    char c_nlink[8];
+    char c_mtime[8];
+    char c_filesize[8];
+    char c_devmajor[8];
+    char c_devminor[8];
+    char c_rdevmajor[8];
+    char c_rdevminor[8];
+    char c_namesize[8];
+    char c_check[8];
+};
+
+static uint32_t hex8_to_u32(const char *s) {
+    uint32_t val = 0;
+    for (int i = 0; i < 8; i++) {
+        val <<= 4;
+        if (s[i] >= '0' && s[i] <= '9') val += s[i] - '0';
+        else if (s[i] >= 'A' && s[i] <= 'F') val += s[i] - 'A' + 10;
+        else if (s[i] >= 'a' && s[i] <= 'f') val += s[i] - 'a' + 10;
+    }
+    return val;
+}
+
+void vfs_load_initrd(uintptr_t addr, uint64_t size) {
+    if (!addr || !size) return;
+
+    uint8_t *ptr = (uint8_t *)addr;
+    uint8_t *end = ptr + size;
+
+    while (ptr < end) {
+        struct cpio_header *h = (struct cpio_header *)ptr;
+        if (strncmp(h->c_magic, "070701", 6) != 0) break;
+
+        uint32_t filesize = hex8_to_u32(h->c_filesize);
+        uint32_t namesize = hex8_to_u32(h->c_namesize);
+        uint32_t mode     = hex8_to_u32(h->c_mode);
+
+        char *name = (char *)(ptr + sizeof(struct cpio_header));
+        if (strcmp(name, "TRAILER!!!") == 0) break;
+
+        uint32_t head_size = sizeof(struct cpio_header) + namesize;
+        uint32_t data_off  = (head_size + 3) & ~3;
+        uint8_t *data      = ptr + data_off;
+
+        char path[PATH_MAX];
+        if (name[0] == '.') {
+            snprintf(path, sizeof(path), "%s", name + 1);
+        } else {
+            snprintf(path, sizeof(path), "/%s", name);
+        }
+
+        if (S_ISDIR(mode)) {
+            vfs_mkdir(path, mode & 0777); 
+        } else if (S_ISREG(mode)) {
+            int fd;
+            if (vfs_open(path, O_CREAT | O_WRONLY, mode & 0777, &fd) == 0) {
+                vfs_write(fd, data, filesize);
+                vfs_close(fd);
+            }
+        }
+
+        ptr += data_off + ((filesize + 3) & ~3);
+    }
+}

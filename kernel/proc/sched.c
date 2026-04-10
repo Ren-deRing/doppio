@@ -49,6 +49,8 @@ struct thread* sched_dequeue(void) {
 }
 
 struct thread* pick_next_thread(void) {
+    uint64_t flags = arch_irq_save();
+
     struct thread *prev = curthread;
 
     if (prev && prev->t_state == THREAD_RUNNING && prev->t_tid != 0) {
@@ -60,11 +62,15 @@ struct thread* pick_next_thread(void) {
         next = arch_get_idle_thread();
     }
 
+    if (next->t_proc && next->t_proc->p_vm_map) {
+        arch_switch_context_hardware(next);
+    }
+
     next->t_state = THREAD_RUNNING;
     curthread = next;
-    
     arch_set_current_thread(next);
 
+    arch_irq_restore(flags);
     return next;
 }
 
@@ -119,6 +125,7 @@ void sched_tick(void) {
         if (curthread->t_ticks >= 10) {
             curthread->t_ticks = 0;
             curthread->t_need_resched = true;
+            arch_request_resched();
         }
     }
 }

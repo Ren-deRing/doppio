@@ -34,7 +34,7 @@ typedef struct {
 } __attribute__((packed)) gdt_pointer_t;
 
 typedef struct {
-    gdt_entry_t entries[6];          // 0:NULL, 1:K-Code, 2:K-Data, 3:U-Data, 4:U-Code, 5:U-Data
+    gdt_entry_t entries[6]; // 0:NULL, 1:K-Code, 2:K-Data, 3:U-Code, 4:U-Data, 5:U-Data(Spare)
     uint16_t tss_limit_low;
     uint16_t tss_base_low;
     uint8_t  tss_base_mid;
@@ -53,6 +53,11 @@ typedef struct {
 } __attribute__((packed)) GDT;
 
 GDT gdt[MAX_CPUS];
+
+void update_tss_rsp0(uintptr_t kstack_top) {
+    struct cpu* c = get_this_core();
+    gdt[c->id].tss.rsp[0] = kstack_top;
+}
 
 static void set_gdt_entry(gdt_entry_t* entry, uint8_t access, uint8_t flags) {
     entry->limit_low = 0xFFFF;
@@ -91,6 +96,7 @@ void gdt_install(void) {
         set_gdt_entry(&gdt[i].table.entries[3], 0xF2, (1 << 5) | (1 << 7) | 0x0F);
         // Index 4: User Code
         set_gdt_entry(&gdt[i].table.entries[4], 0xFA, (1 << 5) | (1 << 7) | 0x0F);
+        set_gdt_entry(&gdt[i].table.entries[5], 0xF2, 0xCF);
 
         // TSS
         uintptr_t tss_addr = (uintptr_t)&gdt[i].tss;

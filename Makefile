@@ -6,12 +6,19 @@ export BUILD_DIR  := $(BASE_DIR)/build
 export OBJ_DIR    := $(BUILD_DIR)/obj
 export BIN_DIR    := $(BASE_DIR)/bin
 
+export USER_OBJ_DIR := $(OBJ_DIR)/user
+export USER_BIN_DIR := $(BUILD_DIR)/rootfs/bin
+
 ISO_IMAGE := $(BIN_DIR)/doppio.iso
 ISO_ROOT  := $(BUILD_DIR)/iso_root
 
+INITRD_ROOT := $(BASE_DIR)/rootfs
+INITRD_TEMP := $(BUILD_DIR)/initrd_temp
+INITRD_IMG  := $(ISO_ROOT)/boot/initrd.img
+
 LIMINE_DIR := $(BASE_DIR)/limine
 
-SUBDIRS := lib libc util kernel base modules boot
+SUBDIRS := lib libc util kernel user modules boot
 
 ifeq ($(ARCH), x86_64)
     ARCH_CFLAGS  := -m64 -march=x86-64 -mno-red-zone
@@ -64,6 +71,19 @@ iso: all
 	@rm -rf $(ISO_ROOT)
 	@mkdir -p $(ISO_ROOT)/boot/limine
 	@mkdir -p $(ISO_ROOT)/EFI/BOOT
+
+	@rm -rf $(INITRD_TEMP)
+	@mkdir -p $(INITRD_TEMP)/bin
+
+	@if [ -d "$(INITRD_ROOT)" ]; then \
+		cp -r $(INITRD_ROOT)/* $(INITRD_TEMP)/; \
+	fi
+
+	@if [ -d "$(USER_BIN_DIR)" ]; then \
+		cp -rv $(USER_BIN_DIR)/* $(INITRD_TEMP)/bin/ 2>/dev/null || true; \
+	fi
+
+	@cd $(INITRD_TEMP) && find . | cpio -o -H newc > $(INITRD_IMG)
 
 	@cp -v $(BIN_DIR)/$(OUTPUT) $(ISO_ROOT)/boot/
 	@cp -v $(BASE_DIR)/limine.conf $(ISO_ROOT)/boot/limine/

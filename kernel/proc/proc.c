@@ -2,6 +2,7 @@
 #include <kernel/kmem.h>
 #include <kernel/cpu.h>
 #include <kernel/init.h>
+#include <kernel/lock.h>
 #include <kernel/sched.h>
 
 #include <uapi/errno.h>
@@ -14,6 +15,12 @@ struct proc* proc_create(pid_t pid) {
 
     memset(p, 0, sizeof(struct proc));
     p->p_pid = pid;
+    spin_lock_init(&p->p_lock);
+
+    if (arch_proc_init(p) != 0) {
+        kfree(p);
+        return NULL;
+    }
     
     extern struct vnode *g_root_vnode;
     if (g_root_vnode) {
@@ -43,7 +50,11 @@ struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void), voi
     t->t_arg = arg;
     t->t_need_resched = false;
 
-    arch_thread_setup(t, entry);
+    if (arch_thread_init(t, entry) != 0) {
+        kfree(t->t_kstack);
+        kfree(t);
+        return NULL;
+    }
     
     return t;
 }
@@ -57,6 +68,8 @@ void proc_free(struct proc *p) {
             p->p_fd_table[i] = NULL;
         }
     }
+
+    arch_proc_destroy(p);
 
     if (p->p_cwd) {
         vput(p->p_cwd);

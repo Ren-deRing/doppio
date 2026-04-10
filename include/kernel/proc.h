@@ -3,11 +3,15 @@
 #include <uapi/types.h>
 #include <stdbool.h>
 
+#include <kernel/mmu.h>
 #include <kernel/fs/file.h>
 #include <kernel/lock.h>
 
 #define KSTACK_SIZE 4096
 #define MAX_FILES 32
+
+#define THREAD_FLAG_USER   (1 << 0)
+#define THREAD_FLAG_KERNEL (1 << 1)
 
 typedef enum {
     THREAD_EMBRYO,  // what?
@@ -20,30 +24,35 @@ typedef enum {
 
 struct proc;
 struct vnode;
+struct arch_proc;
 
 // TCB
 struct thread {
     tid_t            t_tid;
-    struct proc     *t_proc;     /* 소속 프로세스 */
+    struct proc     *t_proc;
     
     void            *t_kstack;   /* 커널 스택 바닥 */
     void            *t_context;  /* 레지스터 컨텍스트 */
     void            *t_arch_data;/* 알아서 써라 */
     
-    int              t_state;    /* 스레드 상태 */
+    int              t_state;
     
-    struct thread   *t_next;     /* 스레드 리스트 */
+    struct thread   *t_next;
     struct thread   *t_sched_next;
+
+    // ---------------------
 
     bool             t_need_resched;
     uint32_t         t_ticks;
 
-    // Safe to edit
     uint64_t         t_sleep_until;
     struct list_node t_wait_node;
     spinlock_t      *t_lock_to_release;
 
     void            *t_arg;
+    int              t_flags;
+
+    uintptr_t        t_user_stack_top;
 };
 
 // PCB
@@ -54,7 +63,14 @@ struct proc {
     struct file    *p_fd_table[MAX_FILES];
     struct vnode   *p_cwd;
     
+    page_table_t   *p_vm_map;
+    uintptr_t       p_entry;
+    uintptr_t       p_stack_top;
+
+    struct arch_proc *p_arch;
+
     struct thread  *p_threads;
+    struct proc    *p_parent;
 };
 
 extern struct thread *curthread;

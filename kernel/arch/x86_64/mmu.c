@@ -307,7 +307,7 @@ pt_entry_t* vmm_get_pte(page_table_t* pml4, uint64_t virt, bool allocate) {
             *entry = new_table_phys | X86_PTE_PRESENT | X86_PTE_WRITABLE | X86_PTE_USER;
         } else {
             if (allocate) {
-                *entry |= X86_PTE_WRITABLE;
+                *entry |= X86_PTE_WRITABLE | X86_PTE_USER;
             }
         }
 

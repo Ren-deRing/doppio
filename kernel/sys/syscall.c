@@ -35,19 +35,13 @@ int64_t sys_test(uint64_t arg1) {
 int64_t sys_write(uint64_t fd, const char *buf, size_t count) {
     if (fd == 1 || fd == 2) {
         char kbuf[256];
-        size_t processed = 0;
 
-        while (processed < count) {
-            size_t chunk = (count - processed > 255) ? 255 : (count - processed);
-            
-            if (copy_from_user(kbuf, buf + processed, chunk) < 0) {
-                return -EFAULT;
-            }
+        if (copy_from_user(kbuf, buf, (count > 255 ? 255 : count)) < 0) {
+            return -EFAULT;
+        }
 
-            for (size_t i = 0; i < chunk; i++) {
-                kputc(kbuf[i]);
-            }
-            processed += chunk;
+        for (size_t i = 0; i < count; i++) {
+            kputc(kbuf[i]);
         }
         return count;
     }

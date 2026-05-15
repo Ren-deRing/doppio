@@ -102,30 +102,28 @@ const char* exceptions[32] = {
 };
 
 void panic(const char* description, struct registers *regs) {
+    uintptr_t fault_addr = read_cr2();
+
     dprintf("\n[KERNEL PANIC] %s (Vector: %d)\n", description, regs->int_no);
     dprintf("Error Code: %08x\n", regs->err_code);
     dprintf("RIP: %016llx  RSP: %016llx\n", regs->rip, regs->rsp);
     dprintf("CS: %02x  SS: %02x  RFLAGS: %08x\n", regs->cs, regs->ss, regs->rflags);
+    if (regs->int_no == 14) {
+        dprintf("CR2: %016lx\n", fault_addr);
+        
+        uintptr_t write_target = regs->rsp - 8;
+        dprintf("Expected write target: %016lx\n", write_target);
+        
+        if (curthread && curthread->t_proc) {
+            uintptr_t paddr = mmu_translate(curthread->t_proc->p_vm_map, write_target);
+            dprintf("mmu_translate(write_target): %016lx\n", paddr);
+            paddr = mmu_translate(curthread->t_proc->p_vm_map, regs->rsp);
+            dprintf("mmu_translate(rsp): %016lx\n", paddr);
+        }
+    }
 
     asm volatile ("outb %b0, %w1" : : "a"(1), "Nd"(0xf4));
     for (;;) arch_halt();
-}
-
-void page_fault_handler(struct registers *regs, void *data) {
-    uintptr_t fault_addr = read_cr2();
-    struct thread *thr = curthread;
-
-    if (thr && thr->t_kstack) {
-        uintptr_t stack_start = (uintptr_t)thr->t_kstack;
-        uintptr_t guard_page_start = stack_start - PAGE_SIZE;
-
-        if (fault_addr >= guard_page_start && fault_addr < stack_start) {
-            panic("Kernel Stack Overflow", regs);
-            return;
-        }
-    }
-    
-    panic(exceptions[14], regs);
 }
 
 void idt_install(void) {
@@ -134,8 +132,6 @@ void idt_install(void) {
         if (i == 8 || i == 14) ist_index = 1;
         idt_set_descriptor(i, (void*)isr_stub_table[i], 0x8E, ist_index);
     }
-
-    register_handler(14, page_fault_handler, NULL);
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uintptr_t)&idt;

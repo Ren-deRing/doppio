@@ -77,10 +77,15 @@ page_table_t* load_elf(void *elf_data, uintptr_t *out_entry, uintptr_t *out_brk)
             size_t off_in_page = curr_v % PAGE_SIZE;
             size_t to_copy = MIN(file_size - written, PAGE_SIZE - off_in_page);
             
-            memcpy((void *)(p2v(phys) + off_in_page), 
-                   (void *)((uintptr_t)elf_data + file_offset + written), 
-                   to_copy);
-                   
+            void* dest_addr = (void *)p2v(phys);
+            void* src_addr = (void *)((uintptr_t)elf_data + file_offset + written);
+
+            uint64_t src_val = *(uint64_t*)src_addr;
+
+            memcpy(dest_addr, src_addr, to_copy);
+
+            uint64_t dest_val = *(uint64_t*)dest_addr;
+
             written += to_copy;
         }
         // asm volatile ("clac");

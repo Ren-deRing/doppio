@@ -16,9 +16,9 @@ int proc_exec(struct proc *p, void *elf_data) {
         return -ENOEXEC;
     }
 
-    uintptr_t stack_top = USER_STACK_TOP; 
+    uintptr_t stack_top = USER_STACK_TOP + PAGE_SIZE;
     uintptr_t stack_bottom = stack_top - USER_STACK_SIZE;
-    
+
     for (uintptr_t curr = stack_bottom; curr < stack_top; curr += PAGE_SIZE) {
         page_t *pg = page_alloc(0);
         if (!pg) {
@@ -35,11 +35,11 @@ int proc_exec(struct proc *p, void *elf_data) {
     p->p_vm_map = new_map;
     
     p->p_entry = entry_point;
-    p->p_stack_top = stack_top;
+    p->p_stack_top = USER_STACK_TOP;
     p->p_brk = ALIGN_UP(brk, PAGE_SIZE);
 
     if (curthread && curthread->t_proc == p) {
-        curthread->t_user_stack_top = stack_top;
+        curthread->t_user_stack_top = USER_STACK_TOP;
     }
 
     if (old_map && old_map != mmu_get_kernel_map()) {

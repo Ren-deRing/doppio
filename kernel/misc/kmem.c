@@ -285,7 +285,6 @@ void kfree(void* ptr) {
 }
 
 void* krealloc(void* ptr, size_t size) {
-    dprintf("krealloc: %p, size=%d\n", ptr, size);
     if (!ptr) return kmalloc(size);
     if (size == 0) {
         kfree(ptr);

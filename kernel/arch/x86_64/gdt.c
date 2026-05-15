@@ -87,16 +87,16 @@ static inline void gdt_load(gdt_pointer_t* ptr) {
 
 void gdt_install(void) {
     for (int i = 0; i < MAX_CPUS; i++) {
-        // Index 1: Kernel Code (0x08)
+        // Index 1: Kernel Code   (0x08)
         set_gdt_entry(&gdt[i].table.entries[1], 0x9A, 0x20);
-        // Index 2: Kernel Data (0x10)
+        // Index 2: Kernel Data   (0x10)
         set_gdt_entry(&gdt[i].table.entries[2], 0x92, 0x00);
-        // Index 3: User Data (0x18 | 3 = 0x1B)
+        // Index 3: User Data     (0x1B)
         set_gdt_entry(&gdt[i].table.entries[3], 0xF3, 0x00);
-        // Index 4: User Code (0x20 | 3 = 0x23)
+        // Index 4: User Data     (0x23)
         set_gdt_entry(&gdt[i].table.entries[4], 0xF3, 0x00);
-        // Index 5: User Code (0x2B)
-        set_gdt_entry(&gdt[i].table.entries[5], 0xFB, 0x00);
+        // Index 5: User Code     (0x2B)
+        set_gdt_entry(&gdt[i].table.entries[5], 0xFB, 0x20);
 
         // TSS
         uintptr_t tss_addr = (uintptr_t)&gdt[i].tss;

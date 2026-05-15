@@ -74,30 +74,14 @@ void generic_main(void) {
                 vfs_read(fd, elf_buf, size);
                 vfs_close(fd);
 
-                dprintf("Loading /bin/init...\n");
-
                 int exec_ret = proc_exec(curthread->t_proc, elf_buf);
-                dprintf("proc_exec returned: %d\n", exec_ret);
                 if (exec_ret == 0) {
                     curthread->t_flags |= THREAD_FLAG_USER;
                     arch_set_kernel_stack((uintptr_t)curthread->t_kstack + KSTACK_SIZE);
 
                     arch_switch_mm(NULL, curthread->t_proc);
 
-                    dprintf("Entering User Mode: entry=%p stack=%p\n",
-                            (void*)curthread->t_proc->p_entry,
-                            (void*)curthread->t_proc->p_stack_top);
-
-                    uintptr_t check = mmu_translate(curthread->t_proc->p_vm_map, 
-                                curthread->t_proc->p_entry);
-                    dprintf("mmu_translate(entry): paddr=%p\n", (void*)check);
-
-                    uintptr_t cr3;
-                    asm volatile ("mov %%cr3, %0" : "=r"(cr3));
-                    dprintf("CR3 after switch_mm: %p\n", (void*)cr3);
-
-                    arch_enter_user_mode(curthread->t_proc->p_entry,
-                                        curthread->t_proc->p_stack_top);
+                    arch_enter_user_mode(curthread->t_proc->p_entry, curthread->t_proc->p_stack_top);
                 }
                 kfree(elf_buf);
             }

@@ -3,7 +3,7 @@
 #include <kernel/proc.h>
 #include <stdint.h>
 
-#define USER_STACK_TOP    0x7FFFFFFEFFFF
+#define USER_STACK_TOP    0x7ffffffff000UL
 #define USER_STACK_SIZE   (1024 * 1024)
 #define USER_STACK_PAGES  (USER_STACK_SIZE / 4096)
 

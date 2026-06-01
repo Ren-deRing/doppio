@@ -3,6 +3,7 @@
 #include <kernel/printf.h>
 #include <kernel/proc.h>
 #include <kernel/mmu.h>
+#include "x86.h"
 
 static inline uintptr_t read_cr2(void) {
     uintptr_t val;
@@ -105,6 +106,7 @@ void panic(const char* description, struct registers *regs) {
     uintptr_t fault_addr = read_cr2();
 
     dprintf("\n[KERNEL PANIC] %s (Vector: %d)\n", description, regs->int_no);
+    dprintf("GS_BASE: %016llx  KERNEL_GS_BASE: %016llx\n", rdmsr(MSR_GS_BASE), rdmsr(MSR_KERNEL_GS_BASE));
     dprintf("Error Code: %08x\n", regs->err_code);
     dprintf("RIP: %016llx  RSP: %016llx\n", regs->rip, regs->rsp);
     dprintf("CS: %02x  SS: %02x  RFLAGS: %08x\n", regs->cs, regs->ss, regs->rflags);

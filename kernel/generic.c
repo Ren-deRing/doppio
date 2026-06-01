@@ -39,7 +39,7 @@ void do_ap_initcalls(void) {
 }
 
 void generic_main(void) {
-    do_late_initcalls();
+   do_late_initcalls();
 
     ap_release = true;
     __sync_synchronize();
@@ -48,20 +48,12 @@ void generic_main(void) {
     uint32_t width = g_boot_info.fb.width;
     uint32_t height = g_boot_info.fb.height;
     uint32_t pixels_per_line = g_boot_info.fb.pitch / 4;
-
     for (uint32_t y = 0; y < height; y++) {
-        for (uint32_t x = 0; x < width; x++) {
-            fb_ptr[y * pixels_per_line + x] = 0xF3E0ED;
-        }
+        for (uint32_t x = 0; x < width; x++) fb_ptr[y * pixels_per_line + x] = 0xF3E0ED;
     }
-
     for (uint32_t y = height/2 - 50; y < height/2 + 50; y++) {
-        for (uint32_t x = width/2 - 50; x < width/2 + 50; x++) {
-            fb_ptr[y * pixels_per_line + x] = 0xFFFFFF;
-        }
+        for (uint32_t x = width/2 - 50; x < width/2 + 50; x++) fb_ptr[y * pixels_per_line + x] = 0xFFFFFF;
     }
-
-    extern void arch_enter_user_mode(uintptr_t entry, uintptr_t user_rsp);
 
     int fd;
     if (vfs_open("/bin/init", O_RDONLY, 0, &fd) == 0) {
@@ -74,15 +66,10 @@ void generic_main(void) {
                 vfs_read(fd, elf_buf, size);
                 vfs_close(fd);
 
-                int exec_ret = proc_exec(curthread->t_proc, elf_buf);
-                if (exec_ret == 0) {
-                    curthread->t_flags |= THREAD_FLAG_USER;
-                    arch_set_kernel_stack((uintptr_t)curthread->t_kstack + KSTACK_SIZE);
+                char *init_argv[] = {"/bin/init", NULL};
+                char *init_envp[] = {NULL};
 
-                    arch_switch_mm(NULL, curthread->t_proc);
-
-                    arch_enter_user_mode(curthread->t_proc->p_entry, curthread->t_proc->p_stack_top);
-                }
+                proc_exec(elf_buf, init_argv, init_envp);
                 kfree(elf_buf);
             }
         }

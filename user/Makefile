@@ -1,25 +1,35 @@
-U_SRCS := $(shell find . -name "*.c" -o -name "*.S")
+U_SRCS := $(shell find . -maxdepth 2 -name "*.c" -o -name "*.S")
 
 U_OBJS := $(patsubst ./%, $(USER_OBJ_DIR)/%, $(U_SRCS))
 U_OBJS := $(U_OBJS:.c=.o)
 U_OBJS := $(U_OBJS:.S=.o)
 
-USER_PROGS := $(notdir $(patsubst %/,%,$(dir $(U_SRCS))))
+USER_PROGS := $(filter-out .,$(notdir $(patsubst %/,%,$(dir $(U_SRCS)))))
 
-USER_CFLAGS  := $(CFLAGS) -fno-pic -fno-pie -I$(BASE_DIR)/user/include
-USER_LDFLAGS := -m elf_x86_64 -nostdlib -static -L$(OBJ_DIR)/libc -lc
+USER_CFLAGS  := -g -O1 -ffreestanding -fno-stack-protector \
+                -fno-pic -fno-pie -fno-omit-frame-pointer \
+                -m64 -march=x86-64 -mno-red-zone \
+                -I$(BASE_DIR)/user/include \
+                -I$(MUSL_OUT_DIR)/include
 
-.PHONY: all clean
+USER_LDFLAGS := -m elf_x86_64 -nostdlib -static \
+                -Ttext 0x400000 \
+                -L$(MUSL_OUT_DIR)/lib -lc \
+                -z separate-code -z max-page-size=0x1000
+
+.PHONY: all clean libc.a
 
 all: $(USER_PROGS)
 
-$(USER_PROGS): libc.a $(U_OBJS)
+$(USER_PROGS): $(U_OBJS)
 	@mkdir -p $(USER_BIN_DIR)
 	@echo "[USER LD] $@"
-	@$(LD) $(USER_LDFLAGS) $(filter $(USER_OBJ_DIR)/$@/%, $(U_OBJS)) -o $(USER_BIN_DIR)/$@
-
-libc.a:
-	@$(MAKE) -C $(BASE_DIR)/libc
+	$(LD) $(USER_LDFLAGS) \
+		$(MUSL_OUT_DIR)/lib/crt1.o \
+		$(MUSL_OUT_DIR)/lib/crti.o \
+		$(filter $(USER_OBJ_DIR)/$@/%, $(U_OBJS)) \
+		$(MUSL_OUT_DIR)/lib/crtn.o \
+		-o $(USER_BIN_DIR)/$@
 
 $(USER_OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

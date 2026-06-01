@@ -67,6 +67,11 @@ int arch_thread_init(struct thread *t);
 void arch_thread_destroy(struct thread *t);
 void arch_set_kernel_stack(uintptr_t kstack_top);
 void arch_switch_mm(struct proc *prev, struct proc *next);
+int arch_thread_fork(struct thread *child_t, struct thread *parent_t);
+void arch_cpu_set_fs_base(uintptr_t addr);
+void fork_child_switch_mm(void);
+void arch_exec_setup_trapframe(struct trapframe *tf, uintptr_t entry, uintptr_t user_rsp);
+void arch_set_kernel_stack(uintptr_t kstack_top);
 
 #define irq_save(flags)    do { flags = arch_irq_save(); } while(0)
 #define irq_restore(flags) arch_irq_restore(flags)

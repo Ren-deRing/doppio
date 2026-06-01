@@ -665,5 +665,97 @@ page_table_t* mmu_get_kernel_map(void) {
     return g_kernel_pagemap;
 }
 
+void mmu_protect_page(page_table_t* map, uintptr_t vaddr, int prot) {
+    pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, false);
+    
+    if (pte && (*pte & X86_PTE_PRESENT)) {
+        uint64_t new_flags = X86_PTE_PRESENT | X86_PTE_USER;
+        
+        if (prot & 0x2) { // PROT_WRITE
+            new_flags |= X86_PTE_WRITABLE;
+        }
+
+        if (!(prot & 0x4)) {
+            new_flags |= X86_PTE_NX;
+        }
+
+        uint64_t paddr_mask = 0x000FFFFFFFFFF000ULL;
+        uint64_t paddr = *pte & paddr_mask;
+        
+        *pte = paddr | new_flags;
+
+        invlpg((uint64_t)vaddr);
+    }
+}
+
+page_table_t *mmu_clone_map(page_table_t *parent_map) {
+    if (!parent_map) return NULL;
+
+    page_table_t *child_map = mmu_create_map();
+    if (!child_map) return NULL;
+
+    for (int i = 0; i < 256; i++) {
+        pt_entry_t pml4e = parent_map->entries[i];
+        if (!(pml4e & X86_PTE_PRESENT)) continue;
+
+        page_table_t *pdpt = (page_table_t *)ENTRY_TO_VIRT(pml4e);
+        for (int j = 0; j < 512; j++) {
+            pt_entry_t pdpte = pdpt->entries[j];
+            if (!(pdpte & X86_PTE_PRESENT)) continue;
+
+            page_table_t *pd = (page_table_t *)ENTRY_TO_VIRT(pdpte);
+            for (int k = 0; k < 512; k++) {
+                pt_entry_t pde = pd->entries[k];
+                if (!(pde & X86_PTE_PRESENT)) continue;
+
+                if (pde & X86_PTE_HUGE) {
+                    uint64_t parent_phys = pde & PAGE_ADDR_MASK;
+                    
+                    uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21);
+
+                    page_t *child_page = page_alloc(9);
+                    if (!child_page) {
+                        mmu_destroy_map(child_map);
+                        return NULL;
+                    }
+                    uint64_t child_phys = page_to_phys(child_page);
+
+                    memcpy(p2v(child_phys), p2v(parent_phys), PAGE_SIZE_2M);
+
+                    uint64_t flags = pde & ~PAGE_ADDR_MASK;
+
+                    vmm_map_huge(child_map, va, child_phys, flags);
+                    continue;
+                }
+
+                page_table_t *pt = (page_table_t *)ENTRY_TO_VIRT(pde);
+                for (int l = 0; l < 512; l++) {
+                    pt_entry_t pte = pt->entries[l];
+                    if (!(pte & X86_PTE_PRESENT)) continue;
+
+                    uint64_t parent_phys = pte & PAGE_ADDR_MASK;
+
+                    uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21) | ((uint64_t)l << 12);
+
+                    page_t *child_page = page_alloc(0);
+                    if (!child_page) {
+                        mmu_destroy_map(child_map);
+                        return NULL;
+                    }
+                    uint64_t child_phys = page_to_phys(child_page);
+
+                    memcpy(p2v(child_phys), p2v(parent_phys), PAGE_SIZE);
+
+                    uint64_t flags = pte & ~PAGE_ADDR_MASK;
+
+                    vmm_map(child_map, va, child_phys, flags);
+                }
+            }
+        }
+    }
+
+    return child_map;
+}
+
 mem_initcall(pmm_init, PRIO_FIRST);
 mem_initcall(vmm_init, PRIO_SECOND);

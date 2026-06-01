@@ -35,56 +35,24 @@ void vfs_init(void) {
 
     g_root_vnode->ops->mkdir(g_root_vnode, "bin", 0755);
     g_root_vnode->ops->mkdir(g_root_vnode, "etc", 0755);
+    g_root_vnode->ops->mkdir(g_root_vnode, "dev", 0755);
+    g_root_vnode->ops->mkdir(g_root_vnode, "tmp", 1777);
+    g_root_vnode->ops->mkdir(g_root_vnode, "proc", 0555);
+
+    struct vnode *dev_vn;
+    int err_lookup = vfs_lookup("/dev", curproc->p_cwd, &dev_vn);
+    if (err_lookup == 0) {
+        struct vnode *null_vn;
+        struct vnode *tty_vn;
+        dev_vn->ops->create(dev_vn, "null", S_IFCHR | 0666, &null_vn);
+        dev_vn->ops->create(dev_vn, "tty", S_IFCHR | 0666, &tty_vn);
+        vput(dev_vn);
+        if (null_vn) vput(null_vn);
+        if (tty_vn) vput(tty_vn);
+    }
 
     if (g_boot_info.initrd.virt_base) {
         vfs_load_initrd(g_boot_info.initrd.virt_base, g_boot_info.initrd.size);
-    }
-
-    int fd;
-    int err;
-
-    err = vfs_open("/etc/hostname", O_RDONLY, 0, &fd);
-    if (err == 0) {
-        char buf[64] = {0};
-        int n = vfs_read(fd, buf, sizeof(buf) - 1);
-        dprintf("VFS Test: /etc/hostname content: [%s] (%d bytes)\n", buf, n);
-        vfs_close(fd);
-    } else {
-        dprintf("VFS Test: Failed to open /etc/hostname (Error: %d)\n", err);
-    }
-
-    int dir_fd;
-    if (vfs_open("/bin", O_RDONLY, 0, &dir_fd) == 0) {
-        char dir_buf[512];
-        int bytes_read;
-        dprintf("VFS Test: Listing contents of /bin:\n");
-
-        while ((bytes_read = vfs_readdir(dir_fd, dir_buf, sizeof(dir_buf))) > 0) {
-            struct dirent *de = (struct dirent *)dir_buf;
-            const char *type_str = (de->d_type == DT_DIR) ? "DIR " : "FILE";
-            dprintf("  [%s] Name: %s\n", type_str, de->d_name);
-            
-            break;
-        }
-        vfs_close(dir_fd);
-    } else {
-        dprintf("VFS Test: Failed to open /bin for readdir\n");
-    }
-
-    err = vfs_open("/bin/init", O_RDONLY, 0, &fd);
-    if (err == 0) {
-        unsigned char elf_magic[4];
-        vfs_read(fd, elf_magic, 4);
-        if (elf_magic[0] == 0x7F && elf_magic[1] == 'E' && 
-            elf_magic[2] == 'L' && elf_magic[3] == 'F') {
-            dprintf("VFS Test: /bin/init is a valid ELF file!\n");
-        } else {
-            dprintf("VFS Test: /bin/init found, but NOT a valid ELF (Magic: %02x %02x %02x %02x)\n",
-                    elf_magic[0], elf_magic[1], elf_magic[2], elf_magic[3]);
-        }
-        vfs_close(fd);
-    } else {
-        dprintf("VFS Test: /bin/init NOT found (Error: %d)\n", err);
     }
 }
 

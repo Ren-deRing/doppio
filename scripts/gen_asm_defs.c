@@ -25,12 +25,18 @@ int main() {
     printf("#define TF_RFLAGS 0x%zx\n", offsetof(struct trapframe, rflags));
     printf("#define TF_RSP    0x%zx\n", offsetof(struct trapframe, rsp));
     printf("#define TF_SS     0x%zx\n", offsetof(struct trapframe, ss));
+    // printf("#define TF_ERR_CODE 0x%zx\n", offsetof(struct trapframe, err_code));
 
     printf("#define CPU_CURRENT_THREAD  0x%zx\n", offsetof(struct cpu, current_thread));
     printf("#define CPU_USER_RSP        0x%zx\n", offsetof(struct cpu, user_rsp));
+    printf("#define CPU_KERNEL_RSP        0x%zx\n", offsetof(struct cpu, tss_rsp0));
 
     printf("#define THREAD_NEED_RESCHED 0x%zx\n", offsetof(struct thread, t_need_resched));
+    printf("#define THREAD_CONTEXT      0x%zx\n", offsetof(struct thread, t_context));
+    printf("#define THREAD_KSTACK       0x%zx\n", offsetof(struct thread, t_kstack));
     printf("#define THREAD_STATE        0x%zx\n", offsetof(struct thread, t_state));
+    printf("#define THREAD_TRAPFRAME    0x%zx\n", offsetof(struct thread, t_trapframe));
+    printf("#define THREAD_FS_BASE      0x%zx\n", offsetof(struct thread, t_fs_base));
 
     return 0;
 }

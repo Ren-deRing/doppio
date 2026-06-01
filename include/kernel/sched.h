@@ -14,4 +14,6 @@ struct thread* pick_next_thread(void);
 void sched_enqueue(struct thread *t);
 struct thread* sched_dequeue(void);
 
+void mi_switch(void);
+
 extern volatile uint64_t g_ticks;

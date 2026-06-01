@@ -14,3 +14,5 @@
 #define SEEK_SET    0         /* 커서를 offset 위치로 설정 */
 #define SEEK_CUR    1         /* 현재 위치에서 offset 만큼 이동 */
 #define SEEK_END    2         /* 파일 끝에서 offset 만큼 이동 */
+
+#define AT_EMPTY_PATH 0x1000

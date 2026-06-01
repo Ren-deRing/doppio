@@ -48,29 +48,71 @@ struct thread* sched_dequeue(void) {
     return t;
 }
 
+static const char* get_state_name(thread_state_t state) {
+    switch (state) {
+        case THREAD_RUNNING: return "RUNNING";
+        case THREAD_READY:   return "READY";
+        case THREAD_SLEEP:   return "SLEEP";
+        case THREAD_ZOMBIE:  return "ZOMBIE";
+        default:             return "UNKNOWN";
+    }
+}
+
+#include <kernel/printf.h>
+
+static void dump_ready_queue(void) {
+    struct thread *curr = ready_queue.head;
+    
+    dprintf("[Sched Dump] Ready Queue: ");
+    if (!curr) {
+        dprintf("<EMPTY>\n");
+        return;
+    }
+
+    while (curr) {
+        dprintf("[TID:%d(%s)]", curr->t_tid, get_state_name(curr->t_state));
+        
+        curr = curr->t_sched_next;
+        if (curr) {
+            dprintf(" -> ");
+        }
+    }
+    dprintf("\n");
+}
+
 void mi_switch(void) {
     cpu_status_t flags = arch_irq_save();
 
     struct thread *prev = curthread;
+
+    if (prev->t_state == THREAD_RUNNING && prev->t_tid != 0) {
+        sched_enqueue(prev);
+    }
+
+    // spin_lock(&ready_queue.lock);
+    // dump_ready_queue(); 
+    // spin_unlock(&ready_queue.lock);
+
     struct thread *next = sched_dequeue();
 
     if (!next) {
         next = curcpu->idle;
     }
 
-    if (prev->t_state == THREAD_RUNNING && prev->t_tid != 0) {
-        sched_enqueue(prev);
-    }
-
-    if (prev == next) {
+    if (prev == next && prev->t_state != THREAD_ZOMBIE) {
         arch_irq_restore(flags);
         return;
+    }
+
+    if (prev == next && prev->t_state == THREAD_ZOMBIE) {
+        next = curcpu->idle; 
     }
 
     next->t_state = THREAD_RUNNING;
     curcpu->current_thread = next;
 
     curcpu->tss_rsp0 = (uintptr_t)next->t_kstack + KSTACK_SIZE;
+    arch_set_kernel_stack(curcpu->tss_rsp0);
 
     if (next->t_proc != prev->t_proc) {
         arch_switch_mm(prev->t_proc, next->t_proc);
@@ -127,11 +169,16 @@ void sched_tick(void) {
     }
     spin_unlock(&sleep_queue.lock);
 
-    if (curthread && curthread->t_tid != 0) {
-        curthread->t_ticks++;
-        if (curthread->t_ticks >= 10) {
-            curthread->t_ticks = 0;
-            schedule();
+    struct thread *curr = curthread;
+    if (curr) {
+        if (curr->t_tid == 0) {
+            schedule(); 
+        } else {
+            curr->t_ticks++;
+            if (curr->t_ticks >= 10) {
+                curr->t_ticks = 0;
+                schedule();
+            }
         }
     }
 }
@@ -140,11 +187,13 @@ void scheduler_init(void) {
     spin_lock_init(&ready_queue.lock);
     spin_lock_init(&sleep_queue.lock);
 
+    arch_irq_save();
+
+    g_intc->register_handler(0x40, arch_timer_handler, NULL);
+    g_intc->start_timer(1, 0x40);
+
     arch_init_first_thread();
     // noreturn
-
-    // g_intc->register_handler(0x40, arch_timer_handler, NULL);
-    // g_intc->start_timer(1, 0x40);
 }
 
 dev_initcall(scheduler_init, PRIO_LAST);

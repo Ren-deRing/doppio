@@ -7,10 +7,20 @@
 #define USER_STACK_SIZE   (1024 * 1024)
 #define USER_STACK_PAGES  (USER_STACK_SIZE / 4096)
 
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
 
-int proc_exec(struct proc *p, void *elf_data);
+#ifndef MAX
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+
+int proc_exec(void *elf_data, char *const argv[], char *const envp[]);
 int proc_execpath(struct proc *p, const char *path);
 
-int setup_user_stack(page_table_t *map, uintptr_t stack_top, size_t size);
+uintptr_t setup_user_stack(page_table_t *new_map, uintptr_t user_stack_top, 
+                           char *const argv[], char *const envp[],
+                           uintptr_t phdr_vaddr, uint64_t phnum);
 
-page_table_t* load_elf(void *elf_data, uintptr_t *out_entry, uintptr_t *out_brk);
+page_table_t* load_elf(void *elf_data, uintptr_t *out_entry, uintptr_t *out_brk, 
+                      uintptr_t *out_phdr_vaddr, uint64_t *out_phnum);

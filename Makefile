@@ -17,6 +17,9 @@ INITRD_TEMP := $(BUILD_DIR)/initrd_temp
 INITRD_IMG  := $(ISO_ROOT)/boot/initrd.img
 
 LIMINE_DIR := $(BASE_DIR)/limine
+MUSL_DIR := $(BASE_DIR)/musl
+
+export MUSL_OUT_DIR := $(MUSL_DIR)/build_out
 
 SUBDIRS := lib libc util kernel user modules boot
 
@@ -48,7 +51,7 @@ export LDFLAGS  := $(ARCH_LDFLAGS) -nostdlib -static --gc-sections \
 				   -no-pie -z max-page-size=0x1000 \
                    -T $(BASE_DIR)/kernel/arch/$(ARCH)/linker.ld
 
-.PHONY: all clean $(SUBDIRS) run limine_setup
+.PHONY: all clean $(SUBDIRS) run setup iso
 
 all: $(BIN_DIR)/$(OUTPUT)
 
@@ -59,13 +62,36 @@ $(SUBDIRS):
 $(BIN_DIR)/$(OUTPUT): $(SUBDIRS)
 	@mkdir -p $(BIN_DIR)
 	@echo "[LD] Linking $@"
-	$(LD) $(LDFLAGS) $(shell find $(OBJ_DIR) -name "*.o" | sort) -o $@
+	$(eval ALL_OBJS := $(shell find $(OBJ_DIR) -name "*.o"))
+	$(eval KERNEL_OBJS := $(filter-out $(USER_OBJ_DIR)/%, $(ALL_OBJS)))
+	$(LD) $(LDFLAGS) $(shell echo $(KERNEL_OBJS) | tr ' ' '\n' | sort) -o $@
 
-limine_setup:
+download:
 	@if [ ! -d "$(LIMINE_DIR)" ]; then \
 		echo "Downloading Limine binaries..."; \
 		git clone https://codeberg.org/Limine/Limine.git limine --branch=v10.x-binary --depth=1; \
 	fi
+	@if [ ! -d "$(MUSL_DIR)" ] || [ ! -f "$(MUSL_DIR)/configure" ]; then \
+		echo "Downloading musl source..."; \
+		rm -rf $(MUSL_DIR); \
+		mkdir -p $(MUSL_DIR); \
+		wget https://musl.libc.org/releases/musl-1.1.24.tar.gz; \
+		tar -xf musl-1.1.24.tar.gz -C $(MUSL_DIR) --strip-components=1; \
+		rm musl-1.1.24.tar.gz; \
+	fi
+
+musl_build: download
+	@if [ ! -f "$(MUSL_OUT_DIR)/lib/libc.a" ]; then \
+		echo "[MUSL] Configuring and building musl libc..."; \
+		cd $(MUSL_DIR) && \
+		CC="clang -target $(ARCH)-unknown-none-elf" \
+		CFLAGS="-g -O2 -ffreestanding -fno-stack-protector -m64 -march=x86-64 -mno-red-zone" \
+		./configure --prefix=$(MUSL_OUT_DIR) --disable-shared --enable-static && \
+		$(MAKE) -j$$(nproc) && \
+		$(MAKE) install; \
+	fi
+
+setup: musl_build
 
 iso: all
 	@rm -rf $(ISO_ROOT)

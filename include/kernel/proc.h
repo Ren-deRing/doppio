@@ -12,6 +12,9 @@
 #define THREAD_FLAG_USER   (1 << 0)
 #define THREAD_FLAG_KERNEL (1 << 1)
 
+extern pid_t next_pid;
+extern tid_t next_tid;
+
 typedef enum {
     THREAD_EMBRYO,
     THREAD_READY,
@@ -20,6 +23,12 @@ typedef enum {
     THREAD_WAITING,
     THREAD_ZOMBIE
 } thread_state_t;
+
+typedef enum {
+    PROC_RUNNING,
+    PROC_ZOMBIE,
+    PROC_STOPPED,
+} proc_state_t;
 
 struct proc;
 struct vnode;
@@ -37,7 +46,7 @@ struct trapframe {
     uint64_t rsp;
     uint64_t ss;
 
-    uint64_t err_code;
+    // uint64_t err_code;
 };
 
 // TCB
@@ -60,17 +69,30 @@ struct thread {
     struct list_node t_wait_node;
     spinlock_t      *t_lock_to_release;
 
+    uintptr_t        t_fs_base;
+
+    uint64_t        t_sig_pending;
+    uint64_t        t_sig_mask;
+
     void            (*t_entry)(void *);
     void            *t_arg;
     int              t_flags;
 
     uintptr_t        t_user_stack_top;
+
+    int              t_errno;
 };
 
 // PCB
 struct proc {
     pid_t           p_pid;
+    uid_t           p_uid, p_euid;
+    gid_t           p_gid, p_egid;
+    proc_state_t    p_state;
     spinlock_t      p_lock;
+
+    char            p_name[16];
+    mode_t          p_umask;
 
     struct file    *p_fd_table[MAX_FILES];
     struct vnode   *p_cwd;
@@ -79,11 +101,15 @@ struct proc {
     uintptr_t       p_entry;
     uintptr_t       p_stack_top;
     uintptr_t       p_brk;
+    uintptr_t       p_mmap_base;
 
     struct arch_proc *p_arch;
 
-    struct thread  *p_threads;
-    struct proc    *p_parent;
+    struct thread    *p_threads;
+
+    struct proc      *p_parent;
+    struct list_node  p_child_link;
+    struct list_node  p_children;
 };
 
 

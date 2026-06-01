@@ -5,6 +5,7 @@
 #include <uapi/types.h>
 
 #define MSR_GS_BASE 0xC0000101
+#define MSR_FS_BASE 0xC0000100
 #define MSR_KERNEL_GS_BASE 0xC0000102
 #define MSR_EFER 0xC0000080
 #define EFER_SCE (1ULL << 0)

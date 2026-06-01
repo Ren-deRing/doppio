@@ -1,8 +1,13 @@
 .section .text
+
+#include "build/gen/asm_defines.h"
+
 .global arch_start_thread
 .global arch_context_switch
 .global thread_bootstrap
 .global arch_enter_user_mode
+.global fork_child_ret
+
 .extern generic_main
 
 arch_start_thread:
@@ -23,6 +28,10 @@ arch_context_switch:
 
     movq 24(%rsi), %rsp
 
+    movq THREAD_TRAPFRAME(%rsi), %rax
+    cmpq %rax, %rsp
+    je arch_return_to_user
+
     popq %r15
     popq %r14
     popq %r13
@@ -32,23 +41,22 @@ arch_context_switch:
 
     ret
 
+    
+
 thread_bootstrap:
     sti
 
-    movq %gs:0, %rax
-    movq 32(%rax), %rbx # rbx = curthread
+    movq %r13, %rdi
+    movq %r12, %rax
 
-    movq 112(%rbx), %rdi    # arg1 = curthread->t_arg
-    movq 104(%rbx), %rax    # rax = curthread->t_entry
     call *%rax
 
-    # TODO: thread_exit()
 .Lhang:
     cli
     hlt
     jmp .Lhang
 
-arch_enter_user_mode:  // rdi=entry, rsi=user_rsp
+arch_enter_user_mode:  # rdi=entry, rsi=user_rsp
     cli
 
     movw $0x23, %ax
@@ -69,11 +77,82 @@ arch_enter_user_mode:  // rdi=entry, rsi=user_rsp
     xorq %r14, %r14
     xorq %r15, %r15
 
-    pushq $0x23     // ss
-    pushq %rsi      // user rsp
-    pushq $0x202    // rflags
-    pushq $0x2B     // cs
-    pushq %rdi      // rip
+    pushq $0x23     # ss
+    pushq %rsi      # user rsp
+    pushq $0x202    # rflags
+    pushq $0x2B     # cs
+    pushq %rdi      # rip
+
+    swapgs
+    iretq
+
+fork_child_ret:
+    call fork_child_switch_mm
+    
+    movq %gs:CPU_CURRENT_THREAD, %rax
+    movq THREAD_TRAPFRAME(%rax), %rsp
+
+    movq TF_RAX(%rsp), %rax
+    movq TF_RBX(%rsp), %rbx
+    movq TF_RDX(%rsp), %rdx
+    movq TF_RSI(%rsp), %rsi
+    movq TF_RDI(%rsp), %rdi
+    movq TF_RBP(%rsp), %rbp
+    movq TF_R8(%rsp),  %r8
+    movq TF_R9(%rsp),  %r9
+    movq TF_R10(%rsp), %r10
+    movq TF_R12(%rsp), %r12
+    movq TF_R13(%rsp), %r13
+    movq TF_R14(%rsp), %r14
+    movq TF_R15(%rsp), %r15
+
+    movq %rsp, %r11
+
+    movq TF_SS(%r11), %r10
+    pushq %r10
+    movq TF_RSP(%r11), %r10
+    pushq %r10
+    movq TF_RFLAGS(%r11), %r10
+    pushq %r10
+    movq TF_CS(%r11), %r10
+    pushq %r10
+    movq TF_RIP(%r11), %r10
+    pushq %r10
+
+    swapgs
+    iretq
+
+.global arch_return_to_user
+arch_return_to_user:
+    movq %gs:CPU_CURRENT_THREAD, %rax
+    movq THREAD_TRAPFRAME(%rax), %rsp
+
+    movq TF_RAX(%rsp), %rax
+    movq TF_RBX(%rsp), %rbx
+    movq TF_RDX(%rsp), %rdx
+    movq TF_RSI(%rsp), %rsi
+    movq TF_RDI(%rsp), %rdi
+    movq TF_RBP(%rsp), %rbp
+    movq TF_R8(%rsp),  %r8
+    movq TF_R9(%rsp),  %r9
+    movq TF_R10(%rsp), %r10
+    movq TF_R12(%rsp), %r12
+    movq TF_R13(%rsp), %r13
+    movq TF_R14(%rsp), %r14
+    movq TF_R15(%rsp), %r15
+
+    movq %rsp, %r11
+
+    movq TF_SS(%r11), %r10
+    pushq %r10
+    movq TF_RSP(%r11), %r10
+    pushq %r10
+    movq TF_RFLAGS(%r11), %r10
+    pushq %r10
+    movq TF_CS(%r11), %r10
+    pushq %r10
+    movq TF_RIP(%r11), %r10
+    pushq %r10
 
     swapgs
     iretq

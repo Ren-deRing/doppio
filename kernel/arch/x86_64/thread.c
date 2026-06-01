@@ -21,6 +21,7 @@ struct thread* arch_init_first_thread(void) {
     t0->t_tid = 0;
     t0->t_proc = p0;
     t0->t_state = THREAD_RUNNING;
+    t0->t_fs_base = 0;
     
     t0->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
     memset(t0->t_arch_data, 0, g_xsave_size);
@@ -60,6 +61,8 @@ int arch_thread_init(struct thread *t) {
         return -ENOMEM;
     }
 
+    t->t_fs_base = 0;
+
     memset(t->t_arch_data, 0, g_xsave_size);
     memcpy(t->t_arch_data, g_fpu_preset, g_xsave_size);
     
@@ -71,8 +74,8 @@ int arch_thread_init(struct thread *t) {
 
     *--kstack = 0; // r15
     *--kstack = 0; // r14
-    *--kstack = 0; // r13
-    *--kstack = 0; // r12
+    *--kstack = (uintptr_t)t->t_entry;
+    *--kstack = (uintptr_t)t->t_arg;
     *--kstack = 0; // rbx
     *--kstack = 0; // rbp
 
@@ -99,4 +102,62 @@ void arch_switch_mm(struct proc *prev, struct proc *next) {
             asm volatile("mov %0, %%cr3" : : "r"(next_cr3) : "memory");
         }
     }
+}
+
+extern void fork_child_ret(void);
+int arch_thread_fork(struct thread *child_t, struct thread *parent_t) {
+    child_t->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
+    if (!child_t->t_arch_data) return -ENOMEM;
+    memcpy(child_t->t_arch_data, parent_t->t_arch_data, g_xsave_size);
+
+    child_t->t_fs_base = parent_t->t_fs_base;
+
+    uintptr_t kstack_top = (uintptr_t)child_t->t_kstack + KSTACK_SIZE;
+
+    if (!parent_t->t_trapframe) {
+        kfree(child_t->t_arch_data);
+        return -EINVAL;
+    }
+
+    uintptr_t tf_addr = kstack_top - sizeof(struct trapframe);
+
+    struct trapframe *child_tf = (struct trapframe *)tf_addr;
+    
+    memcpy(child_tf, parent_t->t_trapframe, sizeof(struct trapframe));
+    child_tf->rax = 0;
+    child_t->t_trapframe = child_tf;
+
+    uintptr_t *kstack = (uintptr_t *)child_tf;
+
+    *--kstack = (uintptr_t)fork_child_ret;
+    // *--kstack = 0;
+
+    *--kstack = 0; // r15
+    *--kstack = 0; // r14
+    *--kstack = 0; // r13
+    *--kstack = 0; // r12
+    *--kstack = 0; // rbx
+    *--kstack = 0; // rbp
+
+    child_t->t_context = (void *)kstack;
+
+    return 0;
+}
+
+void fork_child_switch_mm(void) {
+    arch_switch_mm(NULL, curthread->t_proc);
+}
+
+void arch_exec_setup_trapframe(struct trapframe *tf, uintptr_t entry, uintptr_t user_rsp) {
+    uintptr_t old_rax = tf->rax; 
+    
+    memset(tf, 0, sizeof(struct trapframe));
+
+    tf->rax = old_rax;
+    tf->rip = entry;
+    tf->rsp = user_rsp;
+    tf->cs = 0x2B;
+    tf->ss = 0x23;
+    tf->rcx = entry;  
+    tf->r11 = 0x202;
 }

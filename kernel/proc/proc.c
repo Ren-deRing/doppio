@@ -10,6 +10,9 @@
 
 #include <string.h>
 
+pid_t next_pid = 1;
+tid_t next_tid = 1;
+
 struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void *), void *arg) {
     struct thread *t = kmalloc(sizeof(struct thread));
     if (!t) return NULL;
@@ -66,6 +69,10 @@ struct proc* proc_create(pid_t pid) {
     memset(p, 0, sizeof(struct proc));
     p->p_pid = pid;
     spin_lock_init(&p->p_lock);
+
+    list_init(&p->p_children);
+
+    p->p_mmap_base = 0x400000000000;
 
     if (arch_proc_init(p) != 0) {
         kfree(p);

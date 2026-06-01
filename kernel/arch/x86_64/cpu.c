@@ -57,9 +57,16 @@ void arch_timer_handler(struct registers *regs, void *data) {
     (void)regs; 
     (void)data;
 
-    g_intc->eoi();
-
     g_ticks++;
     
-    sched_tick(); 
+    sched_tick();
+
+    g_intc->eoi(); 
+}
+
+void arch_cpu_set_fs_base(uintptr_t addr) {
+    uint32_t low = (uint32_t)addr;
+    uint32_t high = (uint32_t)(addr >> 32);
+    
+    wrmsr(MSR_FS_BASE, addr);
 }

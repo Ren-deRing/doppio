@@ -2,6 +2,8 @@
 .extern isr_handler
 .extern mi_switch
 
+#include "build/gen/asm_defines.h"
+
 .macro ISR_NOERRCODE num
 .global isr\num
 isr\num:
@@ -86,6 +88,14 @@ isr_common_stub:
     pushq %r14
     pushq %r15
 
+
+    testb $3, (15*8 + 24)(%rsp)
+    jz .skip_tf_update
+    movq %gs:0, %rax
+    movq CPU_CURRENT_THREAD(%rax), %rax # curthread
+    movq %rsp, THREAD_TRAPFRAME(%rax)
+
+.skip_tf_update:
     movq %rsp, %rdi
     call isr_handler
 
@@ -97,6 +107,26 @@ isr_common_stub:
 
     movb $0, 64(%rax)
     call mi_switch
+
+    movq %gs:0, %rax
+    movq 32(%rax), %rax
+
+    testb $3, 144(%rsp)
+    jz .skip_rsp_restore
+
+    movq THREAD_TRAPFRAME(%rax), %rcx
+    testq %rcx, %rcx
+    jz .skip_rsp_restore
+
+    movq %rcx, %rsp
+
+.skip_rsp_restore:
+    movq 104(%rax), %rax
+    movq %rax, %rdx
+    shrq $32, %rdx
+    movl %eax, %eax
+    movl $0xC0000100, %ecx
+    wrmsr
 
 restore_and_exit:
     popq %r15
@@ -117,7 +147,7 @@ restore_and_exit:
 
     addq $16, %rsp
 
-    cmpq $0x1B, 8(%rsp)
+    cmpq $0x2B, 8(%rsp)
     jne .skip_swapgs
     swapgs
 .skip_swapgs:

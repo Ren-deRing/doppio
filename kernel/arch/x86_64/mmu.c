@@ -12,7 +12,14 @@
 
 #include <kernel/printf.h>
 #include <kernel/init.h>
+#include <kernel/cpu.h>
 #include <kernel/mmu.h>
+#include <kernel/sched.h>
+#include <kernel/lock.h>
+
+static spinlock_t g_mmu_lock = SPINLOCK_INITIALIZER;
+
+void handle_page_fault(struct trapframe *regs, void *data);
 
 #include <boot/bootinfo.h>
 
@@ -28,6 +35,7 @@
 #define X86_PTE_HUGE     (1ULL << 7)
 #define X86_PTE_GLOBAL   (1ULL << 8)
 #define X86_PTE_NX       (1ULL << 63)
+#define X86_PTE_COW      (1ULL << 9)
 
 #define PAGE_ADDR_MASK   0x000ffffffffff000ull
 
@@ -475,6 +483,9 @@ void vmm_init(void) {
     }
 
     set_cr3(v2p(g_kernel_pagemap));
+
+    extern void register_handler(uint8_t vector, handler_t handler, void *data);
+    register_handler(14, handle_page_fault, NULL);
 }
 
 void vmm_unmap(page_table_t* pml4, uint64_t virt) {
@@ -495,7 +506,12 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
     if (*entries[2] & X86_PTE_HUGE) {
         uint64_t phys = *entries[2] & PAGE_ADDR_MASK;
         page_t* page = phys_to_page(phys);
-        if (page && page->ref_count > 0) page->ref_count--;
+        if (page && page->ref_count > 0) {
+            page->ref_count--;
+            if (page->ref_count == 0) {
+                page_free(page, 9);
+            }
+        }
 
         *entries[2] = 0;
         invlpg(virt);
@@ -516,7 +532,12 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
 
     uint64_t phys = *entries[3] & PAGE_ADDR_MASK;
     page_t* page = phys_to_page(phys);
-    if (page && page->ref_count > 0) page->ref_count--;
+    if (page && page->ref_count > 0) {
+        page->ref_count--;
+        if (page->ref_count == 0) {
+            page_free(page, 0);
+        }
+    }
 
     *entries[3] = 0;
     invlpg(virt);
@@ -591,9 +612,34 @@ void vmm_destroy_map(page_table_t* pml4) {
             
             for (int k = 0; k < 512; k++) {
                 pt_entry_t pde = pd->entries[k];
-                if (!(pde & X86_PTE_PRESENT) || (pde & X86_PTE_HUGE)) continue;
+                if (!(pde & X86_PTE_PRESENT)) continue;
+
+                if (pde & X86_PTE_HUGE) {
+                    uint64_t phys = pde & PAGE_ADDR_MASK;
+                    page_t *pg = phys_to_page(phys);
+                    if (pg && pg->ref_count > 0) {
+                        pg->ref_count--;
+                        if (pg->ref_count == 0) {
+                            page_free(pg, 9);
+                        }
+                    }
+                    continue;
+                }
 
                 page_table_t* pt = (page_table_t*)ENTRY_TO_VIRT(pde);
+                for (int l = 0; l < 512; l++) {
+                    pt_entry_t pte = pt->entries[l];
+                    if (pte & X86_PTE_PRESENT) {
+                        uint64_t phys = pte & PAGE_ADDR_MASK;
+                        page_t *pg = phys_to_page(phys);
+                        if (pg && pg->ref_count > 0) {
+                            pg->ref_count--;
+                            if (pg->ref_count == 0) {
+                                page_free(pg, 0);
+                            }
+                        }
+                    }
+                }
                 pmm_free_pages(phys_to_page(v2p(pt)), 0);
             }
             pmm_free_pages(phys_to_page(v2p(pd)), 0);
@@ -627,7 +673,9 @@ page_table_t* mmu_create_map(void) {
 }
 
 void mmu_destroy_map(page_table_t* map) {
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     vmm_destroy_map(map);
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
 }
 
 page_t* page_alloc(uint8_t order) {
@@ -640,16 +688,23 @@ void page_free(page_t* page, uint8_t order) {
 
 bool mmu_map(page_table_t* map, uintptr_t vaddr, uintptr_t paddr, uint64_t prot) {
     uint64_t x86_flags = mmu_to_x86_flags(prot);
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
+    bool ret;
 
     if ((vaddr % PAGE_SIZE_2M == 0) && (paddr % PAGE_SIZE_2M == 0)) {
-        return vmm_map_huge(map, (uint64_t)vaddr, (uint64_t)paddr, x86_flags);
+        ret = vmm_map_huge(map, (uint64_t)vaddr, (uint64_t)paddr, x86_flags);
+    } else {
+        ret = vmm_map(map, (uint64_t)vaddr, (uint64_t)paddr, x86_flags);
     }
 
-    return vmm_map(map, (uint64_t)vaddr, (uint64_t)paddr, x86_flags);
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+    return ret;
 }
 
 void mmu_unmap(page_table_t* map, uintptr_t vaddr) {
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     vmm_unmap(map, (uint64_t)vaddr);
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
 }
 
 uintptr_t mmu_translate(page_table_t* map, uintptr_t vaddr) {
@@ -666,6 +721,7 @@ page_table_t* mmu_get_kernel_map(void) {
 }
 
 void mmu_protect_page(page_table_t* map, uintptr_t vaddr, int prot) {
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, false);
     
     if (pte && (*pte & X86_PTE_PRESENT)) {
@@ -686,6 +742,7 @@ void mmu_protect_page(page_table_t* map, uintptr_t vaddr, int prot) {
 
         invlpg((uint64_t)vaddr);
     }
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
 }
 
 page_table_t *mmu_clone_map(page_table_t *parent_map) {
@@ -694,6 +751,7 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
     page_table_t *child_map = mmu_create_map();
     if (!child_map) return NULL;
 
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     for (int i = 0; i < 256; i++) {
         pt_entry_t pml4e = parent_map->entries[i];
         if (!(pml4e & X86_PTE_PRESENT)) continue;
@@ -715,6 +773,7 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
 
                     page_t *child_page = page_alloc(9);
                     if (!child_page) {
+                        spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
                         mmu_destroy_map(child_map);
                         return NULL;
                     }
@@ -734,27 +793,118 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
                     if (!(pte & X86_PTE_PRESENT)) continue;
 
                     uint64_t parent_phys = pte & PAGE_ADDR_MASK;
-
                     uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21) | ((uint64_t)l << 12);
-
-                    page_t *child_page = page_alloc(0);
-                    if (!child_page) {
-                        mmu_destroy_map(child_map);
-                        return NULL;
-                    }
-                    uint64_t child_phys = page_to_phys(child_page);
-
-                    memcpy(p2v(child_phys), p2v(parent_phys), PAGE_SIZE);
-
                     uint64_t flags = pte & ~PAGE_ADDR_MASK;
 
-                    vmm_map(child_map, va, child_phys, flags);
+                    if (flags & X86_PTE_WRITABLE) {
+                        // Make parent page read-only and mark as CoW
+                        flags &= ~X86_PTE_WRITABLE;
+                        flags |= X86_PTE_COW;
+                        pt->entries[l] = parent_phys | flags;
+                        invlpg((uint64_t)va);
+                    }
+
+                    // Increment the reference count of the physical page
+                    page_t *pg = phys_to_page(parent_phys);
+                    if (pg) {
+                        pg->ref_count++;
+                    }
+
+                    vmm_map(child_map, va, parent_phys, flags);
                 }
             }
         }
     }
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
 
     return child_map;
+}
+
+static inline uintptr_t read_cr2(void) {
+    uintptr_t val;
+    asm volatile ("mov %%cr2, %0" : "=r"(val));
+    return val;
+}
+
+extern void panic(const char* description, struct trapframe *regs);
+
+void handle_page_fault(struct trapframe *regs, void *data) {
+    (void)data;
+    uintptr_t fault_addr = read_cr2() & ~0xFFF;
+    uint64_t err_code = regs->err_code;
+
+    // Bit 0 (P) = Present, Bit 1 (W/R) = Write
+    if ((err_code & 3) == 3) {
+        page_table_t *map = mmu_get_active_map();
+        if (map) {
+            uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
+            pt_entry_t *pte = vmm_get_pte(map, fault_addr, false);
+            if (pte && (*pte & X86_PTE_PRESENT) && (*pte & X86_PTE_COW)) {
+                uint64_t old_phys = *pte & PAGE_ADDR_MASK;
+                page_t *pg = phys_to_page(old_phys);
+                
+                if (pg) {
+                    if (pg->ref_count > 1) {
+                        page_t *new_pg = page_alloc(0);
+                        if (!new_pg) {
+                            spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+                            panic("CoW: Out of physical memory", regs);
+                        }
+                        uint64_t new_phys = page_to_phys(new_pg);
+                        
+                        spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+                        memcpy(p2v(new_phys), p2v(old_phys), PAGE_SIZE);      
+                        lock_flags = spin_lock_irqsave(&g_mmu_lock);
+                        
+                        pt_entry_t *re_pte = vmm_get_pte(map, fault_addr, false);
+                        if (re_pte && re_pte == pte && (*re_pte & X86_PTE_PRESENT) && (*re_pte & X86_PTE_COW) && ((*re_pte & PAGE_ADDR_MASK) == old_phys)) {
+                            if (pg->ref_count > 1) {
+                                // CoW 삭제 & WRITABLE 복구
+                                uint64_t flags = *re_pte & ~PAGE_ADDR_MASK;
+                                flags &= ~X86_PTE_COW;
+                                flags |= X86_PTE_WRITABLE;
+                                *re_pte = new_phys | flags;
+                                
+                                pg->ref_count--;
+                            } else {
+                                uint64_t flags = *re_pte & ~PAGE_ADDR_MASK;
+                                flags &= ~X86_PTE_COW;
+                                flags |= X86_PTE_WRITABLE;
+                                *re_pte = old_phys | flags;
+                                
+                                page_free(new_pg, 0);
+                            }
+                        } else {
+                            page_free(new_pg, 0);
+                        }
+                    } else {
+                        uint64_t flags = *pte & ~PAGE_ADDR_MASK;
+                        flags &= ~X86_PTE_COW;
+                        flags |= X86_PTE_WRITABLE;
+                        *pte = old_phys | flags;
+                    }
+                    
+                    invlpg((uint64_t)fault_addr);
+                    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+                    return;
+                }
+            }
+            spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+        }
+    }
+
+    // OH SEGFAULT
+    if ((regs->cs & 3) == 3) {
+        if (curproc && curthread) {
+            uint64_t lock_flags = spin_lock_irqsave(&curproc->p_lock);
+            curthread->t_sig_pending |= (1ULL << (SIGSEGV - 1));
+            spin_unlock_irqrestore(&curproc->p_lock, lock_flags);
+            thread_signal_wakeup(curthread);
+            return;
+        }
+    }
+
+    panic("Segmentation Fault", regs);
 }
 
 mem_initcall(pmm_init, PRIO_FIRST);

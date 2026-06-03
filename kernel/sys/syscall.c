@@ -6,6 +6,7 @@
 #include <kernel/sched.h>
 #include <kernel/kmem.h>
 #include <kernel/exec.h>
+#include <kernel/list.h>
 
 #include <kernel/fs/vfs.h>
 #include <kernel/fs/vnode.h>
@@ -132,8 +133,287 @@ int64_t sys_writev(int fd, const void *user_iov, int iovcnt) {
     return total;
 }
 
+#define CLONE_VM             0x00000100
+#define CLONE_FS             0x00000200
+#define CLONE_FILES          0x00000400
+#define CLONE_SIGHAND        0x00000800
+#define CLONE_THREAD         0x00010000
+#define CLONE_SETTLS         0x00080000
+#define CLONE_PARENT_SETTID  0x00100000
+#define CLONE_CHILD_CLEARTID 0x00200000
+#define CLONE_CHILD_SETTID   0x01000000
+
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
+#define FUTEX_PRIVATE_FLAG 128
+
+static spinlock_t futex_lock = SPINLOCK_INITIALIZER;
+static LIST_HEAD(g_futex_waiters);
+
+int64_t sys_futex(uint32_t *uaddr, int op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3) {
+    (void)uaddr2;
+    (void)val3;
+    (void)timeout;
+    int cmd = op & 127;
+
+    if (cmd == FUTEX_WAIT) {
+        if (!is_user_address_range(uaddr, sizeof(uint32_t))) {
+            return -EFAULT;
+        }
+
+        uint64_t flags = spin_lock_irqsave(&futex_lock);
+
+        uint32_t uval;
+        if (copy_from_user(&uval, uaddr, sizeof(uint32_t)) < 0) {
+            spin_unlock_irqrestore(&futex_lock, flags);
+            return -EFAULT;
+        }
+
+        if (uval != val) {
+            spin_unlock_irqrestore(&futex_lock, flags);
+            return -EAGAIN;
+        }
+
+        struct thread *t = curthread;
+        t->t_state = THREAD_WAITING;
+        t->t_futex_addr = (uintptr_t)uaddr;
+        t->t_lock_to_release = &futex_lock;
+
+        list_add_tail(&t->t_wait_node, &g_futex_waiters);
+
+        thread_yield();
+
+        if (t->t_futex_addr != 0) {
+            uint64_t f = spin_lock_irqsave(&futex_lock);
+            if (t->t_wait_node.next && t->t_wait_node.prev) {
+                list_del(&t->t_wait_node);
+            }
+            t->t_futex_addr = 0;
+            spin_unlock_irqrestore(&futex_lock, f);
+            return -EINTR;
+        }
+
+        return 0;
+    } else if (cmd == FUTEX_WAKE) {
+        if (!is_user_address_range(uaddr, sizeof(uint32_t))) {
+            return -EFAULT;
+        }
+
+        uint64_t flags = spin_lock_irqsave(&futex_lock);
+
+        int woken = 0;
+        struct list_node *curr = g_futex_waiters.next;
+        while (curr != &g_futex_waiters) {
+            if (woken >= (int)val) {
+                break;
+            }
+            struct thread *t = list_entry(curr, struct thread, t_wait_node);
+            struct list_node *next_node = curr->next;
+
+            if (t->t_futex_addr == (uintptr_t)uaddr) {
+                list_del(curr);
+                t->t_futex_addr = 0;
+                t->t_state = THREAD_READY;
+                sched_enqueue(t);
+                woken++;
+            }
+            curr = next_node;
+        }
+
+        spin_unlock_irqrestore(&futex_lock, flags);
+        return woken;
+    }
+
+    return -ENOSYS;
+}
+
+int64_t sys_clone(uint64_t flags, void *child_stack, int *parent_tid, int *child_tid, uint64_t newtls) {
+    if (curthread->t_arch_data) {
+        uint32_t eax = 0xFFFFFFFF;
+        uint32_t edx = 0xFFFFFFFF;
+        asm volatile("xsaveq (%0)" 
+                     : 
+                     : "r"(curthread->t_arch_data), "a"(eax), "d"(edx) 
+                     : "memory");
+    }
+
+    if (flags & CLONE_THREAD) {
+        struct thread *child_t = kmalloc_aligned(sizeof(struct thread), 64);
+        if (!child_t) return -ENOMEM;
+        memset(child_t, 0, sizeof(struct thread));
+
+        void *child_stack_k = kmalloc_aligned(KSTACK_SIZE, KSTACK_SIZE);
+        if (!child_stack_k) {
+            kfree_aligned(child_t);
+            return -ENOMEM;
+        }
+        child_t->t_kstack = child_stack_k;
+
+        int err = arch_thread_fork(child_t, curthread);
+        if (err < 0) {
+            kfree_aligned(child_stack_k);
+            kfree_aligned(child_t);
+            return err;
+        }
+
+        if (child_stack) {
+            child_t->t_trapframe->rsp = (uintptr_t)child_stack;
+        }
+
+        child_t->t_tid = next_tid++;
+        child_t->t_proc = curproc;
+        child_t->t_state = THREAD_READY;
+        child_t->t_flags = curthread->t_flags;
+
+        if (flags & CLONE_SETTLS) {
+            child_t->t_fs_base = newtls;
+        }
+
+        if (flags & CLONE_PARENT_SETTID) {
+            if (parent_tid) {
+                if (!is_user_address_range(parent_tid, sizeof(int))) return -EFAULT;
+                if (copy_to_user(parent_tid, &child_t->t_tid, sizeof(int)) < 0) return -EFAULT;
+            }
+        }
+
+        if (flags & CLONE_CHILD_SETTID) {
+            if (child_tid) {
+                if (!is_user_address_range(child_tid, sizeof(int))) return -EFAULT;
+                if (copy_to_user(child_tid, &child_t->t_tid, sizeof(int)) < 0) return -EFAULT;
+            }
+        }
+
+        if (flags & CLONE_CHILD_CLEARTID) {
+            child_t->t_clear_child_tid = child_tid;
+        }
+
+        uint64_t lock_flags = spin_lock_irqsave(&curproc->p_lock);
+        child_t->t_proc_next = curproc->p_threads;
+        curproc->p_threads = child_t;
+        spin_unlock_irqrestore(&curproc->p_lock, lock_flags);
+
+        sched_enqueue(child_t);
+        return child_t->t_tid;
+    } else {
+        struct proc *parent_p = curproc;
+        struct thread *parent_t = curthread;
+
+        struct proc *child_p = proc_create(next_pid++);
+        if (!child_p) return -ENOMEM;
+
+        child_p->p_parent = parent_p;
+        child_p->p_uid = parent_p->p_uid;
+        child_p->p_euid = parent_p->p_euid;
+        child_p->p_gid = parent_p->p_gid;
+        child_p->p_egid = parent_p->p_egid;
+        child_p->p_umask = parent_p->p_umask;
+        memcpy(child_p->p_name, parent_p->p_name, sizeof(parent_p->p_name));
+
+        if (parent_p->p_cwd) {
+            child_p->p_cwd = parent_p->p_cwd;
+            vref(parent_p->p_cwd);
+        }
+
+        uint64_t lock_flags = spin_lock_irqsave(&parent_p->p_lock);
+        for (int i = 0; i < MAX_FILES; i++) {
+            if (parent_p->p_fd_table[i] != NULL) {
+                child_p->p_fd_table[i] = parent_p->p_fd_table[i];
+                child_p->p_fd_table[i]->f_refcnt++; 
+            } else {
+                child_p->p_fd_table[i] = NULL;
+            }
+        }
+        spin_unlock_irqrestore(&parent_p->p_lock, lock_flags);
+
+        child_p->p_vm_map = mmu_clone_map(parent_p->p_vm_map);
+        if (!child_p->p_vm_map) {
+            goto err_proc;
+        }
+        child_p->p_entry = parent_p->p_entry;
+        child_p->p_stack_top = parent_p->p_stack_top;
+        child_p->p_brk = parent_p->p_brk;
+        child_p->p_mmap_base = parent_p->p_mmap_base;
+
+        struct thread *child_t = kmalloc_aligned(sizeof(struct thread), 64);
+        if (!child_t) {
+            goto err_vm_map;
+        }
+        memset(child_t, 0, sizeof(struct thread));
+
+        void *child_stack_k = kmalloc_aligned(KSTACK_SIZE, KSTACK_SIZE);
+        if (!child_stack_k) {
+            goto err_thread;
+        }
+        child_t->t_kstack = child_stack_k;
+
+        int err = arch_thread_fork(child_t, parent_t);
+        if (err < 0) {
+            goto err_stack;
+        }
+
+        if (child_stack) {
+            child_t->t_trapframe->rsp = (uintptr_t)child_stack;
+        }
+
+        child_t->t_tid = next_tid++;
+        child_t->t_proc = child_p;
+        child_p->p_threads = child_t;
+        child_t->t_state = THREAD_READY;
+        child_t->t_flags = parent_t->t_flags;
+
+        if (flags & CLONE_SETTLS) {
+            child_t->t_fs_base = newtls;
+        }
+
+        if (flags & CLONE_PARENT_SETTID) {
+            if (parent_tid) {
+                if (!is_user_address_range(parent_tid, sizeof(int))) goto err_stack;
+                if (copy_to_user(parent_tid, &child_t->t_tid, sizeof(int)) < 0) goto err_stack;
+            }
+        }
+
+        if (flags & CLONE_CHILD_SETTID) {
+            if (child_tid) {
+                if (!is_user_address_range(child_tid, sizeof(int))) goto err_stack;
+                if (copy_to_user(child_tid, &child_t->t_tid, sizeof(int)) < 0) goto err_stack;
+            }
+        }
+
+        if (flags & CLONE_CHILD_CLEARTID) {
+            child_t->t_clear_child_tid = child_tid;
+        }
+
+        uint64_t lock_flags2 = spin_lock_irqsave(&parent_p->p_lock);
+        list_add_tail(&child_p->p_child_link, &parent_p->p_children);
+        spin_unlock_irqrestore(&parent_p->p_lock, lock_flags2);
+
+        sched_enqueue(child_t);
+        return child_p->p_pid;
+
+    err_stack:
+        kfree_aligned(child_stack_k);
+    err_thread:
+        kfree_aligned(child_t);
+    err_vm_map:
+        mmu_destroy_map(child_p->p_vm_map);
+        child_p->p_vm_map = NULL;
+    err_proc:
+        proc_put(child_p);
+        return -ENOMEM;
+    }
+}
+
 int64_t sys_exit(int64_t status) {
+    if (curthread->t_clear_child_tid) {
+        int zero = 0;
+        if (copy_to_user(curthread->t_clear_child_tid, &zero, sizeof(int)) == 0) {
+            sys_futex((uint32_t *)curthread->t_clear_child_tid, 1 /* FUTEX_WAKE */, 1, NULL, NULL, 0);
+        }
+        curthread->t_clear_child_tid = NULL;
+    }
+
     cpu_status_t flags = arch_irq_save();
+    (void)flags;
 
     curproc->p_exit_status = (int)status;
     curproc->p_state = PROC_ZOMBIE;
@@ -156,11 +436,56 @@ int64_t sys_exit(int64_t status) {
 }
 
 int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int64_t offset) {
+    (void)flags;
+    (void)fd;
+    (void)offset;
+
     if (length == 0) return -EINVAL;
 
-    if (addr == 0) {
-        addr = curproc->p_mmap_base;
-        curproc->p_mmap_base += ALIGN_UP(length, PAGE_SIZE);
+    size_t aligned_len = ALIGN_UP(length, PAGE_SIZE);
+    bool need_search = (addr == 0);
+
+    if (addr != 0) {
+        uintptr_t start = ALIGN_DOWN(addr, PAGE_SIZE);
+        uintptr_t end = ALIGN_UP(addr + length, PAGE_SIZE);
+        
+        if (!is_user_address_range((void*)start, end - start)) {
+            need_search = true;
+        } else {
+            for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
+                if (mmu_translate(curproc->p_vm_map, i) != 0) {
+                    need_search = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (need_search) {
+        uintptr_t search_start = 0x400000000000;
+        uintptr_t found_addr = 0;
+
+        while (search_start < curproc->p_mmap_base) {
+            bool range_free = true;
+            for (uintptr_t offset = 0; offset < aligned_len; offset += PAGE_SIZE) {
+                if (mmu_translate(curproc->p_vm_map, search_start + offset) != 0) {
+                    range_free = false;
+                    search_start = ALIGN_UP(search_start + offset + PAGE_SIZE, PAGE_SIZE);
+                    break;
+                }
+            }
+            if (range_free) {
+                found_addr = search_start;
+                break;
+            }
+        }
+
+        if (found_addr != 0) {
+            addr = found_addr;
+        } else {
+            addr = curproc->p_mmap_base;
+            curproc->p_mmap_base += aligned_len;
+        }
     }
 
     uintptr_t start = ALIGN_DOWN(addr, PAGE_SIZE);
@@ -197,12 +522,7 @@ int64_t sys_munmap(uintptr_t addr, size_t length) {
         uintptr_t paddr = mmu_translate(map, i);
         
         if (paddr != 0) {
-            page_t *pg = phys_to_page(paddr);
             mmu_unmap(map, i);
-
-            if (pg && pg->ref_count == 0) {
-                page_free(pg, 0); 
-            }
         }
     }
 
@@ -238,6 +558,16 @@ int64_t sys_brk(uintptr_t brk) {
             }
         }
     } else if (brk < old_brk) {
+        uintptr_t start = ALIGN_UP(brk, PAGE_SIZE);
+        uintptr_t end = ALIGN_UP(old_brk, PAGE_SIZE);
+        page_table_t *map = curproc->p_vm_map;
+
+        for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
+            uintptr_t paddr = mmu_translate(map, i);
+            if (paddr != 0) {
+                mmu_unmap(map, i);
+            }
+        }
     }
 
     curproc->p_brk = brk;
@@ -904,6 +1234,7 @@ static syscall_t syscall_table[] = {
     [16] = (syscall_t)sys_ioctl,
     [20] = (syscall_t)sys_writev,
     [39] = (syscall_t)sys_getpid,
+    [56] = (syscall_t)sys_clone,
     [57] = (syscall_t)sys_fork,
     [59] = (syscall_t)sys_execve,
     [60] = (syscall_t)sys_exit,
@@ -912,6 +1243,7 @@ static syscall_t syscall_table[] = {
     // [63]  = (syscall_t)sys_uname,
     [97]  = (syscall_t)sys_getrlimit,
     [158] = (syscall_t)sys_arch_prctl,
+    [202] = (syscall_t)sys_futex,
     [218] = (syscall_t)sys_set_tid_address,
     [228] = (syscall_t)sys_clock_gettime,
     [231] = (syscall_t)sys_exit, // sys_exit_group
@@ -928,6 +1260,7 @@ int64_t do_syscall_handler(struct trapframe *tf) {
     uint64_t a3 = tf->rdx;
     uint64_t a4 = tf->r10;
     uint64_t a5 = tf->r8;
+    uint64_t a6 = tf->r9;
 
     if (num >= sizeof(syscall_table)/sizeof(syscall_t) ||
         !syscall_table[num]) {
@@ -936,7 +1269,7 @@ int64_t do_syscall_handler(struct trapframe *tf) {
     }
 
     int64_t ret =
-        syscall_table[num](a1, a2, a3, a4, a5, 0);
+        syscall_table[num](a1, a2, a3, a4, a5, a6);
 
     tf->rax = ret;
 

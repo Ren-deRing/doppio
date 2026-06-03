@@ -3,6 +3,7 @@
 #include <uapi/types.h>
 #include <stdbool.h>
 
+#include <kernel/cpu.h>
 #include <kernel/mmu.h>
 #include <kernel/fs/file.h>
 #include <kernel/lock.h>
@@ -50,20 +51,6 @@ struct proc;
 struct vnode;
 struct arch_proc;
 
-struct trapframe {
-    uint64_t rax, rbx, rcx, rdx;
-    uint64_t rsi, rdi, rbp;
-    uint64_t r8, r9, r10, r11;
-    uint64_t r12, r13, r14, r15;
-
-    uint64_t rip;
-    uint64_t cs;
-    uint64_t rflags;
-    uint64_t rsp;
-    uint64_t ss;
-
-    // uint64_t err_code;
-};
 
 struct sigframe {
     struct trapframe sf_tf;
@@ -105,6 +92,9 @@ struct thread {
     uintptr_t        t_user_stack_top;
 
     int              t_errno;
+    struct thread   *t_proc_next;
+    int             *t_clear_child_tid;
+    uintptr_t        t_futex_addr;
 };
 
 // PCB
@@ -150,3 +140,5 @@ int proc_alloc_fd(struct proc *p, struct file *f);
 void proc_ref(struct proc *p);
 void proc_put(struct proc *p);
 struct proc* find_proc(pid_t pid);
+
+void check_signals(struct trapframe *tf);

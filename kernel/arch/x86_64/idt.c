@@ -3,6 +3,8 @@
 #include <kernel/printf.h>
 #include <kernel/proc.h>
 #include <kernel/mmu.h>
+#include <uapi/signal.h>
+#include <kernel/sched.h>
 #include "x86.h"
 
 static inline uintptr_t read_cr2(void) {
@@ -11,19 +13,7 @@ static inline uintptr_t read_cr2(void) {
     return val;
 } // TODO
 
-struct registers {
-    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
-    uint64_t rbp, rdi, rsi, rdx, rcx, rbx, rax;
 
-    uint64_t int_no;
-    uint64_t err_code;
-
-    uint64_t rip;
-    uint64_t cs;
-    uint64_t rflags;
-    uint64_t rsp;
-    uint64_t ss;
-} __attribute__((packed));
 
 struct isr_slot {
     handler_t func;
@@ -102,7 +92,7 @@ const char* exceptions[32] = {
     "Reserved"                        // 31
 };
 
-void panic(const char* description, struct registers *regs) {
+void panic(const char* description, struct trapframe *regs) {
     uintptr_t fault_addr = read_cr2();
 
     dprintf("\n[KERNEL PANIC] %s (Vector: %d)\n", description, regs->int_no);
@@ -145,7 +135,7 @@ void ap_idt_install(void) {
 	asm volatile ("lidt %0" : : "m"(idtr));
 }
 
-static void isr_handler_inner(struct registers *regs) {
+static void isr_handler_inner(struct trapframe *regs) {
     uint8_t vector = (uint8_t)regs->int_no;
     struct isr_slot *slot = &handlers[vector];
 
@@ -153,6 +143,26 @@ static void isr_handler_inner(struct registers *regs) {
         slot->func(regs, slot->data);
     } else {
         if (vector < 32) {
+            if ((regs->cs & 3) == 3) {
+                int sig = SIGSEGV;
+                if (vector == 0 || vector == 16 || vector == 19) {
+                    sig = SIGFPE;
+                } else if (vector == 6) {
+                    sig = SIGILL;
+                } else if (vector == 1 || vector == 3) {
+                    sig = SIGTRAP;
+                } else if (vector == 11 || vector == 17) {
+                    sig = SIGBUS;
+                }
+                
+                if (curproc && curthread) {
+                    uint64_t lock_flags = spin_lock_irqsave(&curproc->p_lock);
+                    curthread->t_sig_pending |= (1ULL << (sig - 1));
+                    spin_unlock_irqrestore(&curproc->p_lock, lock_flags);
+                    thread_signal_wakeup(curthread);
+                    return;
+                }
+            }
             panic(exceptions[regs->int_no], regs);
         } else if (vector >= 32 && vector < 48) {
             // ack_irq(vector - 32); 
@@ -160,8 +170,12 @@ static void isr_handler_inner(struct registers *regs) {
     }
 }
 
-void isr_handler(struct registers *regs) {
+void isr_handler(struct trapframe *regs) {
     isr_handler_inner(regs);
+    if (curthread && (regs->cs & 3) == 3) {
+        curthread->t_trapframe = regs;
+        check_signals(regs);
+    }
 }
 
 arch_initcall(idt_install, PRIO_SECOND);

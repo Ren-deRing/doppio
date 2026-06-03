@@ -53,7 +53,7 @@ uint64_t arch_get_system_ticks(void) {
     return g_ticks;
 }
 
-void arch_timer_handler(struct registers *regs, void *data) {
+void arch_timer_handler(struct trapframe *regs, void *data) {
     (void)regs; 
     (void)data;
 

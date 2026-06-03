@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include <kernel/proc.h>
+struct thread;
+struct proc;
 
 #define MAX_CPUS 64
 #define MAX_ISO 256
@@ -40,8 +41,30 @@ struct cpu {
     kmem_magazine_t* magazines[KMEM_NUM_CLASSES];
 };
 
-struct registers;
-typedef void (*handler_t)(struct registers *regs, void *data);
+#if defined(__x86_64__)
+struct trapframe {
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+    uint64_t rbp, rdi, rsi, rdx, rcx, rbx, rax;
+
+    uint64_t int_no;
+    uint64_t err_code;
+
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
+} __attribute__((packed));
+#elif defined(__aarch64__)
+struct trapframe {
+    uint64_t r[31];
+    uint64_t sp;
+    uint64_t pc;
+    uint64_t pstate;
+} __attribute__((packed));
+#endif
+
+typedef void (*handler_t)(struct trapframe *regs, void *data);
 
 extern struct cpu cpus[MAX_CPUS];
 
@@ -53,7 +76,7 @@ void arch_irq_disable(void);
 void arch_irq_enable(void);
 struct cpu* get_this_core(void);
 
-void arch_timer_handler(struct registers *regs, void *data);
+void arch_timer_handler(struct trapframe *regs, void *data);
 void arch_thread_setup(struct thread *t, void (*entry)(void));
 
 struct thread* arch_init_first_thread(void);

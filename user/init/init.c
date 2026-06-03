@@ -112,6 +112,11 @@ int main(int argc, char *argv[]) {
             printf("[PARENT] BYE!\n");
         }
     }
+    
+    char *execve_argv[] = {"/bin/hello", "hello_arg1", "hello_arg2", NULL};
+    char *execve_envp[] = {"PATH=/bin", "USER=heebb", "SHELL=/bin/sh", NULL};
+
+    execve("/bin/hello", execve_argv, execve_envp);
 
     return 0;
 }

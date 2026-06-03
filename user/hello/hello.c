@@ -77,5 +77,10 @@ int main(int argc, char *argv[], char *envp[]) {
     printf("==================================================\n");
     printf("\n");
 
+    char *execve_argv[] = {"/bin/hello2", "hello_arg1", "hello_arg2", NULL};
+    char *execve_envp[] = {"PATH=/bin", "USER=heebb", "SHELL=/bin/sh", NULL};
+
+    execve("/bin/hello2", execve_argv, execve_envp);
+
     return 0xAB;
 }

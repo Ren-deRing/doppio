@@ -307,24 +307,46 @@ int64_t sys_exit(int status) {
         curthread->t_clear_child_tid = NULL;
     }
 
+    uint64_t proc_lock_flags = spin_lock_irqsave(&curproc->p_lock);
+    struct thread *prev = NULL;
+    struct thread *curr = curproc->p_threads;
+    while (curr) {
+        if (curr == curthread) {
+            if (prev) {
+                prev->t_proc_next = curr->t_proc_next;
+            } else {
+                curproc->p_threads = curr->t_proc_next;
+            }
+            break;
+        }
+        prev = curr;
+        curr = curr->t_proc_next;
+    }
+
+    bool last_thread = (curproc->p_threads == NULL);
+    spin_unlock_irqrestore(&curproc->p_lock, proc_lock_flags);
+
     cpu_status_t irq_flags = arch_irq_save();
     (void)irq_flags;
 
-    curproc->p_exit_status = (int)status;
-    curproc->p_state = PROC_ZOMBIE;
     curthread->t_state = THREAD_ZOMBIE; 
     curthread->t_need_resched = true;
 
-    struct proc *parent = curproc->p_parent;
-    if (parent) {
-        spin_lock(&parent->p_lock);
-        while (!list_empty(&parent->p_wait_queue)) {
-            struct thread *waiter = list_first_entry(&parent->p_wait_queue, struct thread, t_wait_node);
-            list_del(&waiter->t_wait_node);
-            waiter->t_state = THREAD_READY;
-            sched_enqueue(waiter);
+    if (last_thread) {
+        curproc->p_exit_status = (int)status;
+        curproc->p_state = PROC_ZOMBIE;
+
+        struct proc *parent = curproc->p_parent;
+        if (parent) {
+            spin_lock(&parent->p_lock);
+            while (!list_empty(&parent->p_wait_queue)) {
+                struct thread *waiter = list_first_entry(&parent->p_wait_queue, struct thread, t_wait_node);
+                list_del(&waiter->t_wait_node);
+                waiter->t_state = THREAD_READY;
+                sched_enqueue(waiter);
+            }
+            spin_unlock(&parent->p_lock);
         }
-        spin_unlock(&parent->p_lock);
     }
 
     mi_switch();

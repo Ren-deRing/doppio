@@ -129,7 +129,13 @@ int ramfs_inactive(struct vnode *vp) {
                 curr = next;
             }
         }
-        if (node->buffer && !node->is_static_buf) kfree(node->buffer);
+        if (!node->is_static_buf && node->blocks) {
+            size_t num_blocks = (node->size + 4095) / 4096;
+            for (size_t i = 0; i < num_blocks; i++) {
+                if (node->blocks[i]) kfree(node->blocks[i]);
+            }
+            kfree(node->blocks);
+        }
         kfree(node);
         vp->data = NULL;
     }
@@ -142,26 +148,80 @@ ssize_t ramfs_write(struct vnode *vp, const void *buf, size_t count, off_t off) 
     if (vp->type != S_IFREG) return -EISDIR;
 
     if (node->is_static_buf) {
-        char *new_buf = kmalloc(node->size);
-        if (!new_buf) return -ENOMEM;
-        if (node->buffer && node->size > 0) {
-            memcpy(new_buf, node->buffer, node->size);
+        size_t old_size = node->size;
+        size_t num_blocks = (old_size + 4095) / 4096;
+        char **new_blocks = NULL;
+        
+        if (num_blocks > 0) {
+            new_blocks = kmalloc(num_blocks * sizeof(char *));
+            if (!new_blocks) return -ENOMEM;
+            memset(new_blocks, 0, num_blocks * sizeof(char *));
+            
+            for (size_t i = 0; i < num_blocks; i++) {
+                new_blocks[i] = kmalloc(4096);
+                if (!new_blocks[i]) {
+                    for (size_t j = 0; j < i; j++) kfree(new_blocks[j]);
+                    kfree(new_blocks);
+                    return -ENOMEM;
+                }
+                
+                size_t offset = i * 4096;
+                size_t to_copy = 4096;
+                if (offset + to_copy > old_size) {
+                    to_copy = old_size - offset;
+                }
+                
+                memcpy(new_blocks[i], node->buffer + offset, to_copy);
+                if (to_copy < 4096) {
+                    memset(new_blocks[i] + to_copy, 0, 4096 - to_copy);
+                }
+            }
         }
-        node->buffer = new_buf;
+        
+        node->blocks = new_blocks;
         node->is_static_buf = 0;
     }
 
     if (off + count > node->size) {
         size_t new_size = off + count;
-
-        char *new_buf = krealloc(node->buffer, new_size);
-        if (!new_buf) return -ENOMEM;
-
-        node->buffer = new_buf;
+        size_t old_block_count = (node->size + 4095) / 4096;
+        size_t new_block_count = (new_size + 4095) / 4096;
+        
+        if (new_block_count > old_block_count) {
+            char **new_blocks = krealloc(node->blocks, new_block_count * sizeof(char *));
+            if (!new_blocks) return -ENOMEM;
+            
+            for (size_t i = old_block_count; i < new_block_count; i++) {
+                new_blocks[i] = NULL;
+            }
+            node->blocks = new_blocks;
+        }
         node->size = new_size;
     }
 
-    memcpy(node->buffer + off, buf, count);
+    const char *src = (const char *)buf;
+    size_t bytes_written = 0;
+    
+    while (bytes_written < count) {
+        off_t current_off = off + bytes_written;
+        size_t block_idx = current_off / 4096;
+        size_t block_off = current_off % 4096;
+        
+        size_t to_copy = 4096 - block_off;
+        if (to_copy > (count - bytes_written)) {
+            to_copy = count - bytes_written;
+        }
+        
+        if (!node->blocks[block_idx]) {
+            node->blocks[block_idx] = kmalloc(4096);
+            if (!node->blocks[block_idx]) return -ENOMEM;
+            memset(node->blocks[block_idx], 0, 4096);
+        }
+        
+        memcpy(node->blocks[block_idx] + block_off, src + bytes_written, to_copy);
+        bytes_written += to_copy;
+    }
+
     return (ssize_t)count;
 }
 
@@ -174,7 +234,34 @@ ssize_t ramfs_read(struct vnode *vp, void *buf, size_t count, off_t off) {
         count = node->size - off;
     }
 
-    memcpy(buf, node->buffer + off, count);
+    if (count == 0) return 0;
+
+    if (node->is_static_buf) {
+        memcpy(buf, node->buffer + off, count);
+    } else {
+        char *dest = (char *)buf;
+        size_t bytes_read = 0;
+        
+        while (bytes_read < count) {
+            off_t current_off = off + bytes_read;
+            size_t block_idx = current_off / 4096;
+            size_t block_off = current_off % 4096;
+            
+            size_t to_copy = 4096 - block_off;
+            if (to_copy > (count - bytes_read)) {
+                to_copy = count - bytes_read;
+            }
+            
+            if (node->blocks && node->blocks[block_idx]) {
+                memcpy(dest + bytes_read, node->blocks[block_idx] + block_off, to_copy);
+            } else {
+                memset(dest + bytes_read, 0, to_copy);
+            }
+            
+            bytes_read += to_copy;
+        }
+    }
+
     return (ssize_t)count;
 }
 

@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <sys/mount.h>
 
 void sigusr1_handler(int sig) {
     printf("[CHILD] Handler: oh signal %d! Back to you, parent.\n", sig);
@@ -139,6 +141,9 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    mkdir("/mnt/usr", 0755);
+    mount("/usr", "/mnt/usr", "bind", 0, NULL);
+
     char *doom_argv[4];
     doom_argv[0] = "/bin/doom";
     
@@ -149,22 +154,8 @@ int main(int argc, char *argv[]) {
         fd2 = open("/usr/share/games/doom/freedoom2.wad", 0);
     }
 
-    if (fd1 >= 0) {
-        close(fd1);
-        printf("[INIT] Found Freedoom Phase 1 WAD!\n");
-        doom_argv[1] = "-iwad";
-        doom_argv[2] = "/usr/share/games/doom/freedoom1.wad";
-        doom_argv[3] = NULL;
-    } else if (fd2 >= 0) {
-        close(fd2);
-        printf("[INIT] Found Freedoom Phase 2 WAD!\n");
-        doom_argv[1] = "-iwad";
-        doom_argv[2] = "/usr/share/games/doom/freedoom2.wad";
-        doom_argv[3] = NULL;
-    } else {
-        printf("[INIT] No Freedoom WAD found in standard location, let doom engine auto-detect.\n");
-        doom_argv[1] = NULL;
-    }
+    doom_argv[1] = "-iwad";
+    doom_argv[2] = "/usr/share/games/doom/DOOM.WAD";
 
     char *doom_envp[] = {"PATH=/bin", "USER=heebb", "SHELL=/bin/sh", NULL};
 

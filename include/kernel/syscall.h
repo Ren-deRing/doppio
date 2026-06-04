@@ -19,6 +19,7 @@ int copy_from_user(void *dest, const void *user_src, size_t n);
 int64_t sys_read(int fd, void *user_buf, size_t count);
 int64_t sys_write(int fd, const void *user_buf, size_t count);
 int64_t sys_open(const char *user_path, int flags, int mode);
+int64_t sys_mkdir(const char *user_path, int mode);
 int64_t sys_close(int fd);
 int64_t sys_fstat(int fd, void *user_stat);
 int64_t sys_lseek(int fd, int64_t offset, int whence);
@@ -27,6 +28,7 @@ int64_t sys_readv(int fd, const void *iov, int iovcnt);
 int64_t sys_writev(int fd, const void *iov, int iovcnt);
 int64_t sys_fcntl(int fd, int cmd, uint64_t arg);
 int64_t sys_newfstatat(int dfd, const char *path, void *statbuf, int flag);
+int64_t sys_mount(const char *user_source, const char *user_target, const char *user_fstype, uint64_t flags, const void *user_data);
 
 // sys_proc.c
 int64_t sys_getpid(void);

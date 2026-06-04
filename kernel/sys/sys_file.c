@@ -448,3 +448,36 @@ int64_t sys_fcntl(int fd, int cmd, uint64_t arg) {
 
     return 0;
 }
+
+int64_t sys_mkdir(const char *user_path, int mode) {
+    char kpath[256];
+    if (copy_from_user(kpath, user_path, 256) < 0) return -EFAULT;
+    kpath[255] = '\0';
+
+    int err = vfs_mkdir(kpath, (mode_t)mode);
+    return (int64_t)err;
+}
+
+int64_t sys_mount(const char *user_source, const char *user_target, const char *user_fstype, uint64_t flags, const void *user_data) {
+    char source[256];
+    char target[256];
+    char fstype[64] = {0};
+
+    if (copy_from_user(source, user_source, 256) < 0) return -EFAULT;
+    source[255] = '\0';
+
+    if (copy_from_user(target, user_target, 256) < 0) return -EFAULT;
+    target[255] = '\0';
+
+    if (user_fstype) {
+        if (copy_from_user(fstype, user_fstype, 64) < 0) return -EFAULT;
+        fstype[63] = '\0';
+    }
+
+    if ((flags & 0x1000) || strcmp(fstype, "bind") == 0) {
+        int err = vfs_bind(source, target);
+        return (int64_t)err;
+    }
+
+    return -ENOSYS;
+}

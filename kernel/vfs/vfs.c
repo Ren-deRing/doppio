@@ -41,22 +41,6 @@ void vfs_init(void) {
     g_root_vnode->ops->mkdir(g_root_vnode, "usr", 0755);
     g_root_vnode->ops->mkdir(g_root_vnode, "mnt", 0755);
 
-    struct vnode *usr_vn;
-    if (vfs_lookup("/usr", curproc->p_cwd, &usr_vn) == 0) {
-        usr_vn->ops->mkdir(usr_vn, "share", 0755);
-        struct vnode *share_vn;
-        if (vfs_lookup("share", usr_vn, &share_vn) == 0) {
-            share_vn->ops->mkdir(share_vn, "games", 0755);
-            struct vnode *games_vn;
-            if (vfs_lookup("games", share_vn, &games_vn) == 0) {
-                games_vn->ops->mkdir(games_vn, "doom", 0755);
-                vput(games_vn);
-            }
-            vput(share_vn);
-        }
-        vput(usr_vn);
-    }
-
     struct vnode *dev_vn;
     int err_lookup = vfs_lookup("/dev", curproc->p_cwd, &dev_vn);
     if (err_lookup == 0) {
@@ -118,9 +102,6 @@ int vfs_lookup(const char *path, struct vnode *base, struct vnode **res) {
             err = curr->ops->lookup(curr, name, &found);
             if (err < 0) {
                 vput(curr);
-                if (err == -ENOENT && path[0] == '/' && strncmp(path, "/mnt/", 5) == 0) {
-                    return vfs_lookup(path + 4, base, res);
-                }
                 return err;
             }
             vfs_hash_insert(curr, name, found);
@@ -306,6 +287,64 @@ int vfs_mkdir(const char *path, mode_t mode) {
 
     vput(dvp);
     return err;
+}
+
+int vfs_bind(const char *source, const char *target) {
+    if (!curthread || !curthread->t_proc) return -ESRCH;
+    struct proc *p = curthread->t_proc;
+
+    struct vnode *src_vn = NULL;
+    int err = vfs_lookup(source, p->p_cwd, &src_vn);
+    if (err != 0) return err;
+
+    char parent_path[256];
+    char child_name[256];
+    
+    const char *last_slash = strrchr(target, '/');
+    if (!last_slash) {
+        strcpy(parent_path, ".");
+        strcpy(child_name, target);
+    } else if (last_slash == target) {
+        strcpy(parent_path, "/");
+        strcpy(child_name, target + 1);
+    } else {
+        size_t len = last_slash - target;
+        strncpy(parent_path, target, len);
+        parent_path[len] = '\0';
+        strcpy(child_name, last_slash + 1);
+    }
+
+    struct vnode *parent_vn = NULL;
+    err = vfs_lookup(parent_path, p->p_cwd, &parent_vn);
+    if (err != 0) {
+        vput(src_vn);
+        return err;
+    }
+
+    if (parent_vn->type != S_IFDIR) {
+        vput(src_vn);
+        vput(parent_vn);
+        return -ENOTDIR;
+    }
+
+    struct ramfs_node *parent_node = (struct ramfs_node *)parent_vn->data;
+    struct ramfs_entry *entry = kmalloc(sizeof(struct ramfs_entry));
+    if (!entry) {
+        vput(src_vn);
+        vput(parent_vn);
+        return -ENOMEM;
+    }
+
+    strncpy(entry->name, child_name, 255);
+    entry->name[255] = '\0';
+    vref(src_vn);
+    entry->vn = src_vn;
+    entry->next = parent_node->entries;
+    parent_node->entries = entry;
+
+    vput(src_vn);
+    vput(parent_vn);
+    return 0;
 }
 
 subsys_initcall(vfs_init);

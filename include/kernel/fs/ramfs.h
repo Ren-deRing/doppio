@@ -8,7 +8,10 @@ struct ramfs_entry {
 };
 
 struct ramfs_node {
-    char *buffer;
+    union {
+        char *buffer;
+        char **blocks;
+    };
     size_t size;
     int is_static_buf;
     

@@ -138,13 +138,21 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
     }
 
     for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-        page_t *pg = page_alloc(0);
-        if (!pg) return -ENOMEM;
+        uint32_t mmu_flags = MMU_FLAGS_USER;
+        if (prot & 0x2) mmu_flags |= MMU_FLAGS_WRITE; // PROT_WRITE
+        if (flags & 0x1) mmu_flags |= MMU_FLAGS_SHARED; // MAP_SHARED
 
-        uintptr_t paddr = page_to_phys(pg);
-        memset(p2v(paddr), 0, PAGE_SIZE);
+        if (f == NULL) {
+            if (!mmu_map_demand(curproc->p_vm_map, i, mmu_flags)) {
+                return -ENOMEM;
+            }
+        } else {
+            page_t *pg = page_alloc(0);
+            if (!pg) return -ENOMEM;
 
-        if (f && f->f_vn && f->f_vn->ops->read) {
+            uintptr_t paddr = page_to_phys(pg);
+            memset(p2v(paddr), 0, PAGE_SIZE);
+
             int64_t file_offset = offset + (i - start);
             size_t to_read = 0;
             if (length > (i - start)) {
@@ -161,15 +169,11 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
                     return -EIO;
                 }
             }
-        }
 
-        uint32_t mmu_flags = MMU_FLAGS_USER;
-        if (prot & 0x2) mmu_flags |= MMU_FLAGS_WRITE; // PROT_WRITE
-        if (flags & 0x1) mmu_flags |= MMU_FLAGS_SHARED; // MAP_SHARED
-
-        if (!mmu_map_4k(curproc->p_vm_map, i, paddr, mmu_flags)) {
-            page_free(pg, 0);
-            return -ENOMEM;
+            if (!mmu_map_4k(curproc->p_vm_map, i, paddr, mmu_flags)) {
+                page_free(pg, 0);
+                return -ENOMEM;
+            }
         }
     }
 
@@ -211,14 +215,7 @@ int64_t sys_brk(uintptr_t brk) {
 
         for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
             if (mmu_translate(curproc->p_vm_map, i) == 0) {
-                page_t* pg = page_alloc(0);
-                if (!pg) {
-                    return old_brk;
-                }
-                uintptr_t paddr = page_to_phys(pg);
-                memset(p2v(paddr), 0, PAGE_SIZE);
-                if (!mmu_map_4k(curproc->p_vm_map, i, paddr, MMU_FLAGS_USER | MMU_FLAGS_WRITE)) {
-                    page_free(pg, 0);
+                if (!mmu_map_demand(curproc->p_vm_map, i, MMU_FLAGS_USER | MMU_FLAGS_WRITE)) {
                     return old_brk; 
                 }
             }

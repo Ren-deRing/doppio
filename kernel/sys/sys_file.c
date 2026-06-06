@@ -242,34 +242,6 @@ int64_t sys_read(int fd, void *user_buf, size_t count) {
         if (n < 0) return (total == 0) ? n : (int64_t)total;
         if (n == 0) break;
 
-        // If we are reading the DOOM.WAD directory table, print entry info
-        if (fd == 3 && cur_pos >= 12371396 && cur_pos < 12371396 + 36896) {
-            int entry_size = 16;
-            for (int offset = 0; offset < n; offset += entry_size) {
-                int64_t entry_pos = cur_pos + offset;
-                if (entry_pos + entry_size <= 12371396 + 36896) {
-                    int32_t filepos;
-                    int32_t size;
-                    char name[9];
-                    memcpy(&filepos, kbuf + offset, 4);
-                    memcpy(&size, kbuf + offset + 4, 4);
-                    memcpy(name, kbuf + offset + 8, 8);
-                    name[8] = '\0';
-                    // Print specifically around index 528 and 530, or if name matches intro
-                    bool is_intro = (name[0] == 'D' || name[0] == 'd') &&
-                                    (name[1] == '_') &&
-                                    (name[2] == 'I' || name[2] == 'i') &&
-                                    (name[3] == 'N' || name[3] == 'n') &&
-                                    (name[4] == 'T' || name[4] == 't') &&
-                                    (name[5] == 'R' || name[5] == 'r') &&
-                                    (name[6] == 'O' || name[6] == 'o');
-                    if (is_intro || (entry_pos - 12371396) / 16 == 528 || (entry_pos - 12371396) / 16 == 530) {
-                        dprintf("[WAD_ENTRY_READ] index=%lld, name='%s', pos=%d, size=%d\n", (entry_pos - 12371396) / 16, name, filepos, size);
-                    }
-                }
-            }
-        }
-
         if (copy_to_user((char *)user_buf + total, kbuf, n) < 0) {
             return -EFAULT;
         }

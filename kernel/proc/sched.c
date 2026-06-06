@@ -7,14 +7,25 @@
 #include <kernel/kmem.h>
 #include <boot/bootinfo.h>
 #include <string.h>
+#include <kernel/printf.h>
 
 extern void arch_context_switch(struct thread *prev, struct thread *next);
 
-static struct {
-    spinlock_t lock;
+#define MLFQ_LEVELS 4
+
+struct mlfq_queue {
     struct thread *head;
     struct thread *tail;
-} ready_queue;
+};
+
+struct mlfq {
+    spinlock_t lock;
+    struct mlfq_queue queues[MLFQ_LEVELS];
+    uint32_t thread_count;
+};
+
+static struct mlfq cpu_mlfqs[MAX_CPUS];
+static const uint32_t mlfq_slices[MLFQ_LEVELS] = { 5, 10, 20, 40 };
 
 static struct {
     spinlock_t lock;
@@ -24,39 +35,108 @@ static struct {
 void sched_enqueue(struct thread *t) {
     if (!t || t->t_tid == 0) return;
 
-    cpu_status_t flags = spin_lock_irqsave(&ready_queue.lock);
+    if (t->t_cpu >= g_boot_info.smp.total_cores) {
+        t->t_cpu = curcpu ? curcpu->id : 0;
+    }
+
+    uint32_t cpu_id = t->t_cpu;
+    struct mlfq *q = &cpu_mlfqs[cpu_id];
+
+    cpu_status_t flags = spin_lock_irqsave(&q->lock);
     t->t_state = THREAD_READY;
     t->t_sched_next = NULL;
 
-    if (ready_queue.tail) {
-        ready_queue.tail->t_sched_next = t;
-    } else {
-        ready_queue.head = t;
+    int prio = t->t_priority;
+    if (prio < 0 || prio >= MLFQ_LEVELS) {
+        prio = 0;
+        t->t_priority = 0;
     }
-    ready_queue.tail = t;
-    spin_unlock_irqrestore(&ready_queue.lock, flags);
+
+    struct mlfq_queue *mq = &q->queues[prio];
+    if (mq->tail) {
+        mq->tail->t_sched_next = t;
+    } else {
+        mq->head = t;
+    }
+    mq->tail = t;
+    q->thread_count++;
+
+    spin_unlock_irqrestore(&q->lock, flags);
 
     struct cpu *this_cpu = curcpu;
-    for (uint32_t i = 0; i < g_boot_info.smp.total_cores; i++) {
-        if (i != this_cpu->id) {
-            struct cpu *target_cpu = &cpus[i];
-            if (target_cpu->current_thread && target_cpu->current_thread->t_tid == 0) {
-                arch_trigger_resched(i);
-                break;
-            }
+    if (cpu_id != this_cpu->id) {
+        struct cpu *target_cpu = &cpus[cpu_id];
+        if (target_cpu->current_thread && target_cpu->current_thread->t_tid == 0) {
+            arch_trigger_resched(cpu_id);
+        }
+    } else {
+        if (this_cpu->current_thread && this_cpu->current_thread->t_tid == 0) {
+            schedule();
         }
     }
 }
 
 struct thread* sched_dequeue(void) {
-    cpu_status_t flags = spin_lock_irqsave(&ready_queue.lock);
-    struct thread *t = ready_queue.head;
-    if (t) {
-        ready_queue.head = t->t_sched_next;
-        if (!ready_queue.head) ready_queue.tail = NULL;
-        t->t_sched_next = NULL;
+    uint32_t this_cpu_id = curcpu ? curcpu->id : 0;
+    struct mlfq *my_q = &cpu_mlfqs[this_cpu_id];
+
+    cpu_status_t flags = spin_lock_irqsave(&my_q->lock);
+
+    struct thread *t = NULL;
+
+    for (int p = 0; p < MLFQ_LEVELS; p++) {
+        struct mlfq_queue *mq = &my_q->queues[p];
+        t = mq->head;
+        if (t) {
+            mq->head = t->t_sched_next;
+            if (!mq->head) mq->tail = NULL;
+            t->t_sched_next = NULL;
+            my_q->thread_count--;
+            break;
+        }
     }
-    spin_unlock_irqrestore(&ready_queue.lock, flags);
+
+    if (!t) {
+        uint32_t total_cores = g_boot_info.smp.total_cores;
+        for (uint32_t i = 0; i < total_cores; i++) {
+            uint32_t target_cpu = (this_cpu_id + 1 + i) % total_cores;
+            if (target_cpu == this_cpu_id) continue;
+
+            struct mlfq *other_q = &cpu_mlfqs[target_cpu];
+            if (other_q->thread_count == 0) continue;
+
+            if (spin_trylock(&other_q->lock)) {
+                for (int p = 0; p < MLFQ_LEVELS; p++) {
+                    struct mlfq_queue *mq = &other_q->queues[p];
+                    struct thread *stolen = mq->head;
+                    if (stolen) {
+                        mq->head = stolen->t_sched_next;
+                        if (!mq->head) mq->tail = NULL;
+                        stolen->t_sched_next = NULL;
+                        other_q->thread_count--;
+
+                        stolen->t_cpu = this_cpu_id;
+                        t = stolen;
+                        break;
+                    }
+                }
+                spin_unlock(&other_q->lock);
+                if (t) break; // 하하 니 일 이제 내꺼
+            }
+        }
+    }
+
+    if (t) {
+        int prio = t->t_priority;
+        if (prio < 0 || prio >= MLFQ_LEVELS) {
+            prio = 0;
+            t->t_priority = 0;
+        }
+        t->t_slice_left = mlfq_slices[prio];
+        t->t_ticks = 0;
+    }
+
+    spin_unlock_irqrestore(&my_q->lock, flags);
     return t;
 }
 
@@ -70,26 +150,25 @@ static const char* get_state_name(thread_state_t state) {
     }
 }
 
-#include <kernel/printf.h>
+__attribute__((unused)) static void dump_mlfq_queues(void) {
+    uint32_t this_cpu_id = curcpu ? curcpu->id : 0;
+    struct mlfq *q = &cpu_mlfqs[this_cpu_id];
 
-__attribute__((unused)) static void dump_ready_queue(void) {
-    struct thread *curr = ready_queue.head;
-    
-    dprintf("[Sched Dump] Ready Queue: ");
-    if (!curr) {
-        dprintf("<EMPTY>\n");
-        return;
-    }
-
-    while (curr) {
-        dprintf("[TID:%d(%s)]", curr->t_tid, get_state_name(curr->t_state));
-        
-        curr = curr->t_sched_next;
-        if (curr) {
-            dprintf(" -> ");
+    dprintf("[Sched Dump] CPU %d MLFQ Queues:\n", this_cpu_id);
+    for (int p = 0; p < MLFQ_LEVELS; p++) {
+        dprintf("  Prio %d: ", p);
+        struct thread *curr = q->queues[p].head;
+        if (!curr) {
+            dprintf("<EMPTY>\n");
+            continue;
         }
+        while (curr) {
+            dprintf("[TID:%d(%s) rem:%d]", curr->t_tid, get_state_name(curr->t_state), curr->t_slice_left);
+            curr = curr->t_sched_next;
+            if (curr) dprintf(" -> ");
+        }
+        dprintf("\n");
     }
-    dprintf("\n");
 }
 
 void thread_post_switch_hook(void) {
@@ -112,10 +191,6 @@ void mi_switch(void) {
     cpu_status_t flags = arch_irq_save();
 
     struct thread *prev = curthread;
-
-    // spin_lock(&ready_queue.lock);
-    // dump_ready_queue(); 
-    // spin_unlock(&ready_queue.lock);
 
     struct thread *next = sched_dequeue();
 
@@ -146,10 +221,6 @@ void mi_switch(void) {
     if (next->t_proc != prev->t_proc) {
         arch_switch_mm(prev->t_proc, next->t_proc);
     }
-
-    // dprintf("[SWITCH] Switching from TID %d (%s) to TID %d (%s), prev_fs: %p, next_fs: %p\n", 
-    //         prev->t_tid, get_state_name(prev->t_state), next->t_tid, get_state_name(next->t_state),
-    //         (void*)prev->t_fs_base, (void*)next->t_fs_base);
 
     curcpu->prev_thread = prev;
 
@@ -196,6 +267,47 @@ void thread_sleep(uint64_t ms) {
     arch_irq_restore(flags);
 }
 
+static void sched_boost(void) {
+    uint32_t total_cores = g_boot_info.smp.total_cores;
+    for (uint32_t i = 0; i < total_cores; i++) {
+        struct mlfq *q = &cpu_mlfqs[i];
+        cpu_status_t flags = spin_lock_irqsave(&q->lock);
+
+        for (int p = 1; p < MLFQ_LEVELS; p++) {
+            struct mlfq_queue *mq = &q->queues[p];
+            struct thread *t = mq->head;
+            while (t) {
+                struct thread *next_t = t->t_sched_next;
+                t->t_priority = 0;
+                t->t_slice_left = mlfq_slices[0];
+                t->t_sched_next = NULL;
+
+                struct mlfq_queue *mq0 = &q->queues[0];
+                if (mq0->tail) {
+                    mq0->tail->t_sched_next = t;
+                } else {
+                    mq0->head = t;
+                }
+                mq0->tail = t;
+
+                t = next_t;
+            }
+            mq->head = NULL;
+            mq->tail = NULL;
+        }
+        
+        spin_unlock_irqrestore(&q->lock, flags);
+    }
+    
+    cpu_status_t sleep_flags = spin_lock_irqsave(&sleep_queue.lock);
+    struct thread *st = sleep_queue.head;
+    while (st) {
+        st->t_priority = 0;
+        st = st->t_sched_next;
+    }
+    spin_unlock_irqrestore(&sleep_queue.lock, sleep_flags);
+}
+
 void sched_tick(void) {
     uint64_t now = arch_get_system_ticks();
     
@@ -207,13 +319,26 @@ void sched_tick(void) {
     }
     spin_unlock(&sleep_queue.lock);
 
+    static uint64_t last_boost_tick = 0;
+    if (now - last_boost_tick >= 500) {
+        last_boost_tick = now;
+        sched_boost();
+    }
+
     struct thread *curr = curthread;
     if (curr) {
         if (curr->t_tid == 0) {
             schedule(); 
         } else {
+            if (curr->t_slice_left > 0) {
+                curr->t_slice_left--;
+            }
             curr->t_ticks++;
-            if (curr->t_ticks >= 10) {
+
+            if (curr->t_slice_left == 0) {
+                if (curr->t_priority < MLFQ_LEVELS - 1) {
+                    curr->t_priority++;
+                }
                 curr->t_ticks = 0;
                 schedule();
             }
@@ -258,7 +383,15 @@ void thread_signal_wakeup(struct thread *t) {
 }
 
 void scheduler_init(void) {
-    spin_lock_init(&ready_queue.lock);
+    for (int i = 0; i < MAX_CPUS; i++) {
+        spin_lock_init(&cpu_mlfqs[i].lock);
+        for (int p = 0; p < MLFQ_LEVELS; p++) {
+            cpu_mlfqs[i].queues[p].head = NULL;
+            cpu_mlfqs[i].queues[p].tail = NULL;
+        }
+        cpu_mlfqs[i].thread_count = 0;
+    }
+
     spin_lock_init(&sleep_queue.lock);
 
     arch_irq_save();
@@ -266,7 +399,6 @@ void scheduler_init(void) {
     arch_sched_init();
 
     arch_init_first_thread();
-    // noreturn
 }
 
 dev_initcall(scheduler_init, PRIO_LAST);

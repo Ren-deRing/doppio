@@ -38,6 +38,7 @@ void handle_page_fault(struct trapframe *regs, void *data);
 #define X86_PTE_NX       (1ULL << 63)
 #define X86_PTE_COW      (1ULL << 9)
 #define X86_PTE_SHARED   (1ULL << 10)
+#define X86_PTE_DEMAND   (1ULL << 11)
 
 #define PAGE_ADDR_MASK   0x000ffffffffff000ull
 
@@ -530,11 +531,11 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
 
     tables[3] = (page_table_t*)ENTRY_TO_VIRT(*entries[2]);
     entries[3] = &tables[3]->entries[idxs[3]];
-    if (!(*entries[3] & X86_PTE_PRESENT)) return;
+    if (!(*entries[3] & X86_PTE_PRESENT) && !(*entries[3] & X86_PTE_DEMAND)) return;
 
     uint64_t phys = *entries[3] & PAGE_ADDR_MASK;
     page_t* page = phys_to_page(phys);
-    if (page && page->ref_count > 0) {
+    if (page && (*entries[3] & X86_PTE_PRESENT) && page->ref_count > 0) {
         page->ref_count--;
         if (page->ref_count == 0) {
             page_free(page, 0);
@@ -721,6 +722,32 @@ bool mmu_map_4k(page_table_t* map, uintptr_t vaddr, uintptr_t paddr, uint64_t pr
     return ret;
 }
 
+bool mmu_map_demand(page_table_t* map, uintptr_t vaddr, uint64_t prot) {
+    uint64_t x86_flags = mmu_to_x86_flags(prot);
+    
+    x86_flags &= ~X86_PTE_PRESENT;
+    x86_flags |= X86_PTE_DEMAND;
+
+    uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
+    pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, true);
+    if (!pte) {
+        spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+        return false;
+    }
+
+    if (!(*pte & X86_PTE_PRESENT) && !(*pte & X86_PTE_DEMAND)) {
+        uintptr_t pt_vaddr = ALIGN_DOWN((uintptr_t)pte, PAGE_SIZE);
+        page_t* pt_page = phys_to_page(v2p((void*)pt_vaddr));
+        if (pt_page) pt_page->ref_count++;
+    }
+
+    *pte = x86_flags;
+    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+
+    mmu_tlb_shootdown();
+    return true;
+}
+
 void mmu_unmap(page_table_t* map, uintptr_t vaddr) {
     uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     vmm_unmap(map, (uint64_t)vaddr);
@@ -732,6 +759,25 @@ void mmu_unmap(page_table_t* map, uintptr_t vaddr) {
 uintptr_t mmu_translate(page_table_t* map, uintptr_t vaddr) {
     if (!map) return 0;
     uint64_t phys = vmm_get_phys(map, (uint64_t)vaddr);
+    if (phys == 0) {
+        uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
+        pt_entry_t *pte = vmm_get_pte(map, (uint64_t)vaddr, false);
+        if (pte && (*pte & X86_PTE_DEMAND) && !(*pte & X86_PTE_PRESENT)) {
+            page_t *pg = page_alloc(0);
+            if (pg) {
+                phys = page_to_phys(pg);
+                memset(p2v(phys), 0, PAGE_SIZE);
+
+                uint64_t original_flags = *pte;
+                original_flags &= ~X86_PTE_DEMAND;
+                original_flags |= X86_PTE_PRESENT;
+
+                *pte = phys | original_flags;
+                invlpg((uint64_t)vaddr);
+            }
+        }
+        spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+    }
     return (uintptr_t)phys;
 }
 
@@ -747,8 +793,13 @@ void mmu_protect_page(page_table_t* map, uintptr_t vaddr, int prot) {
     uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
     pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, false);
     
-    if (pte && (*pte & X86_PTE_PRESENT)) {
-        uint64_t new_flags = X86_PTE_PRESENT | X86_PTE_USER;
+    if (pte && ((*pte & X86_PTE_PRESENT) || (*pte & X86_PTE_DEMAND))) {
+        uint64_t new_flags = X86_PTE_USER;
+        if (*pte & X86_PTE_PRESENT) {
+            new_flags |= X86_PTE_PRESENT;
+        } else {
+            new_flags |= X86_PTE_DEMAND;
+        }
         
         if (prot & 0x2) { // PROT_WRITE
             new_flags |= X86_PTE_WRITABLE;
@@ -817,7 +868,13 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
                 page_table_t *pt = (page_table_t *)ENTRY_TO_VIRT(pde);
                 for (int l = 0; l < 512; l++) {
                     pt_entry_t pte = pt->entries[l];
-                    if (!(pte & X86_PTE_PRESENT)) continue;
+                    if (!(pte & X86_PTE_PRESENT)) {
+                        if (pte & X86_PTE_DEMAND) {
+                            uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21) | ((uint64_t)l << 12);
+                            vmm_map(child_map, va, 0, pte);
+                        }
+                        continue;
+                    }
 
                     uint64_t parent_phys = pte & PAGE_ADDR_MASK;
                     uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21) | ((uint64_t)l << 12);
@@ -861,6 +918,34 @@ void handle_page_fault(struct trapframe *regs, void *data) {
     uint64_t err_code = regs->err_code;
 
     // Bit 0 (P) = Present, Bit 1 (W/R) = Write
+    if ((err_code & 1) == 0) { // Page not present
+        page_table_t *map = mmu_get_active_map();
+        if (map) {
+            uint64_t lock_flags = spin_lock_irqsave(&g_mmu_lock);
+            pt_entry_t *pte = vmm_get_pte(map, fault_addr, false);
+            if (pte && (*pte & X86_PTE_DEMAND) && !(*pte & X86_PTE_PRESENT)) {
+                page_t *pg = page_alloc(0);
+                if (!pg) {
+                    spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+                    panic("Demand Paging: Out of physical memory", regs);
+                }
+                uint64_t phys_addr = page_to_phys(pg);
+                memset(p2v(phys_addr), 0, PAGE_SIZE);
+
+                uint64_t original_flags = *pte;
+                original_flags &= ~X86_PTE_DEMAND;
+                original_flags |= X86_PTE_PRESENT;
+
+                *pte = phys_addr | original_flags;
+
+                invlpg((uint64_t)fault_addr);
+                spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+                return;
+            }
+            spin_unlock_irqrestore(&g_mmu_lock, lock_flags);
+        }
+    }
+
     if ((err_code & 3) == 3) {
         page_table_t *map = mmu_get_active_map();
         if (map) {

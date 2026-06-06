@@ -39,6 +39,9 @@ struct thread* thread_create(struct proc *p, tid_t tid, void (*entry)(void *), v
     t->t_state = THREAD_READY;
     t->t_ticks = 0;
     t->t_need_resched = false;
+    t->t_priority = 0;
+    t->t_slice_left = 5;
+    t->t_cpu = curcpu ? curcpu->id : 0;
 
     t->t_entry = entry;
     t->t_arg = arg;

@@ -23,6 +23,9 @@ struct thread* arch_init_first_thread(void) {
     p0->p_threads = t0;
     t0->t_state = THREAD_RUNNING;
     t0->t_fs_base = 0;
+    t0->t_priority = 0;
+    t0->t_slice_left = 5;
+    t0->t_cpu = 0;
     
     t0->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
     memset(t0->t_arch_data, 0, g_xsave_size);
@@ -54,6 +57,9 @@ struct thread* arch_init_ap_thread(uint32_t cpu_id) {
 
     t->t_state = THREAD_RUNNING;
     t->t_fs_base = 0;
+    t->t_priority = 0;
+    t->t_slice_left = 5;
+    t->t_cpu = cpu_id;
 
     t->t_arch_data = kmalloc_aligned(g_xsave_size, 64);
     memset(t->t_arch_data, 0, g_xsave_size);

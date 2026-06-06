@@ -53,14 +53,9 @@ int proc_exec(void *elf_data, char *const argv[], char *const envp[]) {
     uintptr_t stack_bottom = stack_top - USER_STACK_SIZE;
 
     for (uintptr_t curr = stack_bottom; curr < stack_top; curr += PAGE_SIZE) {
-        page_t *pg = page_alloc(0);
-        if (!pg) {
+        if (!mmu_map_demand(new_map, curr, MMU_FLAGS_USER | MMU_FLAGS_WRITE | MMU_FLAGS_EXEC)) {
             return -ENOMEM;
         }
-        uintptr_t paddr = page_to_phys(pg);
-        memset(p2v(paddr), 0, PAGE_SIZE);
-        
-        mmu_map(new_map, curr, paddr, MMU_FLAGS_USER | MMU_FLAGS_WRITE | MMU_FLAGS_EXEC);
     }
 
     uintptr_t final_rsp = setup_user_stack(new_map, USER_STACK_TOP, argv, envp, phdr_vaddr, phnum, interpreter_base, original_entry);

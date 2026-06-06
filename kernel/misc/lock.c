@@ -25,6 +25,19 @@ void spin_lock(spinlock_t *lock) {
     lock->holder_cpu = curcpu->id;
 }
 
+bool spin_trylock(spinlock_t *lock) {
+    uint32_t serving = lock->now_serving;
+    if (lock->next_ticket != serving) {
+        return false;
+    }
+    if (__sync_bool_compare_and_swap(&lock->next_ticket, serving, serving + 1)) {
+        __sync_synchronize();
+        lock->holder_cpu = curcpu->id;
+        return true;
+    }
+    return false;
+}
+
 void spin_unlock(spinlock_t *lock) {
     lock->holder_cpu = -1;
     __sync_synchronize();

@@ -74,6 +74,10 @@ struct thread {
     bool             t_need_resched;
     uint32_t         t_ticks;
 
+    int              t_priority;
+    uint32_t         t_slice_left;
+    uint32_t         t_cpu;
+
     uint64_t         t_sleep_until;
     struct list_node t_wait_node;
     spinlock_t      *t_lock_to_release;

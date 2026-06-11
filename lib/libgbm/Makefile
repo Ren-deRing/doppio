@@ -22,6 +22,11 @@ install: $(TARGET)
 	@echo "[INSTALL] Copying $(TARGET) to $(MUSL_OUT_DIR)/lib/"
 	@mkdir -p $(MUSL_OUT_DIR)/lib
 	@cp -f $(TARGET) $(MUSL_OUT_DIR)/lib/$(TARGET)
+	@if [ -n "$(USER_LIB_DIR)" ]; then \
+		echo "[INSTALL] Copying $(TARGET) to $(USER_LIB_DIR)/"; \
+		mkdir -p $(USER_LIB_DIR); \
+		cp -f $(TARGET) $(USER_LIB_DIR)/$(TARGET); \
+	fi
 
 clean:
 	rm -f $(OBJS) $(TARGET)

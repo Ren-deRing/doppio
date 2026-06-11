@@ -8,6 +8,7 @@ export BIN_DIR    := $(BASE_DIR)/bin
 
 export USER_OBJ_DIR := $(OBJ_DIR)/user
 export USER_BIN_DIR := $(BUILD_DIR)/rootfs/bin
+export USER_LIB_DIR := $(BUILD_DIR)/rootfs/lib
 
 ISO_IMAGE := $(BIN_DIR)/doppio.iso
 ISO_ROOT  := $(BUILD_DIR)/iso_root
@@ -108,10 +109,13 @@ iso: all
 	@if [ -d "$(USER_BIN_DIR)" ]; then \
 		cp -rv $(USER_BIN_DIR)/* $(INITRD_TEMP)/bin/ 2>/dev/null || true; \
 	fi
+	@mkdir -p $(USER_LIB_DIR)
+	@cp -f $(MUSL_OUT_DIR)/lib/libc.so $(USER_LIB_DIR)/libc.so
+	@cp -f $(MUSL_OUT_DIR)/lib/libc.so $(USER_LIB_DIR)/ld-musl-x86_64.so.1
 	@mkdir -p $(INITRD_TEMP)/lib
-	@cp -v $(MUSL_OUT_DIR)/lib/libc.so $(INITRD_TEMP)/lib/libc.so
-	@cp -v $(MUSL_OUT_DIR)/lib/libc.so $(INITRD_TEMP)/lib/ld-musl-x86_64.so.1
-	@cp -L -v $(MUSL_OUT_DIR)/lib/*.so* $(INITRD_TEMP)/lib/
+	@if [ -d "$(USER_LIB_DIR)" ]; then \
+		cp -rv $(USER_LIB_DIR)/* $(INITRD_TEMP)/lib/ 2>/dev/null || true; \
+	fi
 
 	@cd $(INITRD_TEMP) && find . -mindepth 1 | cpio -o -H newc > $(INITRD_IMG)
 

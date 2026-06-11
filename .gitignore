@@ -7,10 +7,7 @@
 /apps/doom
 .vscode
 
-
-/apps/**/*
-!/apps/**/*/
-!/apps/**/*.*
-!/apps/**/Makefile
-/apps/**/*.o
-/apps/**/*.so
+*.o
+*.so
+*.a
+*.d

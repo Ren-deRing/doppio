@@ -100,6 +100,28 @@ void vfs_load_initrd(uintptr_t addr, uint64_t size) {
 
         if (S_ISDIR(mode)) {
             mkdir_p(path, mode & 0777); 
+        } else if (S_ISLNK(mode)) {
+            char *target = kmalloc(filesize + 1);
+            if (target) {
+                memcpy(target, data, filesize);
+                target[filesize] = '\0';
+                char *parent = kmalloc(4096);
+                if (parent) {
+                    strncpy(parent, path, 4095);
+                    parent[4095] = '\0';
+                    char *last_slash = strrchr(parent, '/');
+                    if (last_slash && last_slash != parent) {
+                        *last_slash = '\0';
+                        mkdir_p(parent, 0755);
+                    }
+                    kfree(parent);
+                }
+                int r = vfs_symlink(target, path);
+                if (r != 0) {
+                    dprintf("[INITRD] Failed to create symlink %s -> %s, error: %d\n", path, target, r);
+                }
+                kfree(target);
+            }
         } else if (S_ISREG(mode)) {
             char *parent = kmalloc(4096);
             if (parent) {

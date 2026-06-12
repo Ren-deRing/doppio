@@ -939,10 +939,14 @@ int64_t sys_ftruncate(int fd, int64_t length) {
     struct file *f = curproc->p_fd_table[fd];
     if (!f || !f->f_vn) return -EBADF;
 
-    
-    
     if (length < 0) return -EINVAL;
     
+    if (f->f_vn->ops->setattr) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_size = length;
+        return f->f_vn->ops->setattr(f->f_vn, &st);
+    }
     
     return 0;
 }
@@ -1134,11 +1138,25 @@ int64_t sys_accept4(int fd, void *user_addr, uint32_t *user_addrlen, int flags) 
 
 int64_t sys_fallocate(int fd, int mode, int64_t offset, int64_t len) {
     (void)mode;
-    (void)offset;
-    (void)len;
     if (fd < 0 || fd >= MAX_FILES) return -EBADF;
     struct file *f = curproc->p_fd_table[fd];
     if (!f || !f->f_vn) return -EBADF;
+
+    if (offset < 0 || len < 0) return -EINVAL;
+
+    int64_t required_size = offset + len;
+    struct stat st;
+    if (f->f_vn->ops->getattr) {
+        int err = f->f_vn->ops->getattr(f->f_vn, &st);
+        if (err < 0) return err;
+        if (st.st_size < required_size) {
+            if (f->f_vn->ops->setattr) {
+                memset(&st, 0, sizeof(st));
+                st.st_size = required_size;
+                return f->f_vn->ops->setattr(f->f_vn, &st);
+            }
+        }
+    }
     return 0;
 }
 

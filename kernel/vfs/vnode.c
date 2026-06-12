@@ -29,13 +29,17 @@ struct vnode* vnode_alloc(uint32_t type, struct vnode_ops *ops) {
     struct vnode *vn = NULL;
 
     spin_lock(&vnode_list_lock);
-    if (!list_empty(&vnode_free_list)) {
-        vn = list_first_entry(&vnode_free_list, struct vnode, v_freelist);
+    struct vnode *curr_vn;
+    list_for_each_entry(curr_vn, &vnode_free_list, v_freelist) {
+        if (!curr_vn->v_reclaimable) {
+            continue;
+        }
+        vn = curr_vn;
         list_del(&vn->v_freelist);
-        
         if (vn->v_hash.next && vn->v_hash.next != &vn->v_hash) {
             list_del(&vn->v_hash);
         }
+        break;
     }
     spin_unlock(&vnode_list_lock);
 
@@ -54,6 +58,7 @@ struct vnode* vnode_alloc(uint32_t type, struct vnode_ops *ops) {
     vn->data = NULL;
     vn->mnt = NULL;
     vn->v_parent = NULL;
+    vn->v_reclaimable = 1;
     memset(vn->v_name, 0, sizeof(vn->v_name));
 
     list_init(&vn->v_freelist);

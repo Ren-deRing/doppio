@@ -26,6 +26,7 @@ struct vnode* ramfs_create_vnode(uint32_t type) {
     node->nlink = (type == S_IFDIR) ? 2 : 1;
 
     vn->data = node;
+    vn->v_reclaimable = 0;
     return vn;
 }
 
@@ -290,6 +291,7 @@ int ramfs_remove(struct vnode *dvp, const char *name) {
             
             struct ramfs_node *fnode = (struct ramfs_node *)curr->vn->data;
             fnode->unlinked = 1;
+            curr->vn->v_reclaimable = 1;
 
             vput(curr->vn);
             kfree(curr);
@@ -372,6 +374,7 @@ int ramfs_rename(struct vnode *sdvp, const char *sname, struct vnode *tdvp, cons
             *tprev = tcurr->next;
             struct ramfs_node *fnode = (struct ramfs_node *)tcurr->vn->data;
             fnode->unlinked = 1;
+            tcurr->vn->v_reclaimable = 1;
             vput(tcurr->vn);
             kfree(tcurr);
             break;
@@ -390,6 +393,88 @@ int ramfs_rename(struct vnode *sdvp, const char *sname, struct vnode *tdvp, cons
     return 0;
 }
 
+int ramfs_setattr(struct vnode *vp, struct stat *st) {
+    struct ramfs_node *node = (struct ramfs_node *)vp->data;
+    if (vp->type != S_IFREG) return -EINVAL;
+
+    if (node->is_static_buf) {
+        size_t old_size = node->size;
+        size_t num_blocks = (old_size + 4095) / 4096;
+        char **new_blocks = NULL;
+        
+        if (num_blocks > 0) {
+            new_blocks = kmalloc(num_blocks * sizeof(char *));
+            if (!new_blocks) return -ENOMEM;
+            memset(new_blocks, 0, num_blocks * sizeof(char *));
+            
+            for (size_t i = 0; i < num_blocks; i++) {
+                new_blocks[i] = kmalloc(4096);
+                if (!new_blocks[i]) {
+                    for (size_t j = 0; j < i; j++) kfree(new_blocks[j]);
+                    kfree(new_blocks);
+                    return -ENOMEM;
+                }
+                
+                size_t offset = i * 4096;
+                size_t to_copy = 4096;
+                if (offset + to_copy > old_size) {
+                    to_copy = old_size - offset;
+                }
+                
+                memcpy(new_blocks[i], node->buffer + offset, to_copy);
+                if (to_copy < 4096) {
+                    memset(new_blocks[i] + to_copy, 0, 4096 - to_copy);
+                }
+            }
+        }
+        
+        node->blocks = new_blocks;
+        node->is_static_buf = 0;
+    }
+
+    size_t new_size = st->st_size;
+    size_t old_size = node->size;
+    
+    if (new_size > old_size) {
+        size_t old_block_count = (old_size + 4095) / 4096;
+        size_t new_block_count = (new_size + 4095) / 4096;
+        
+        if (new_block_count > old_block_count) {
+            char **new_blocks = krealloc(node->blocks, new_block_count * sizeof(char *));
+            if (!new_blocks) return -ENOMEM;
+            
+            for (size_t i = old_block_count; i < new_block_count; i++) {
+                new_blocks[i] = NULL;
+            }
+            node->blocks = new_blocks;
+        }
+        node->size = new_size;
+    } else if (new_size < old_size) {
+        size_t old_block_count = (old_size + 4095) / 4096;
+        size_t new_block_count = (new_size + 4095) / 4096;
+        
+        if (old_block_count > new_block_count) {
+            for (size_t i = new_block_count; i < old_block_count; i++) {
+                if (node->blocks[i]) {
+                    kfree(node->blocks[i]);
+                }
+            }
+            char **new_blocks = krealloc(node->blocks, new_block_count * sizeof(char *));
+            if (new_block_count > 0 && !new_blocks) {
+                // Ignore krealloc shrinking error
+            } else {
+                node->blocks = new_blocks;
+            }
+        }
+        if (new_size % 4096 != 0 && node->blocks && node->blocks[new_size / 4096]) {
+            memset(node->blocks[new_size / 4096] + (new_size % 4096), 0, 4096 - (new_size % 4096));
+        }
+        node->size = new_size;
+    }
+
+    return 0;
+}
+
 struct vnode_ops ramfs_ops = {
     .lookup   = ramfs_lookup,
     .create   = ramfs_create,
@@ -399,6 +484,7 @@ struct vnode_ops ramfs_ops = {
     .read     = ramfs_read,
     .remove   = ramfs_remove,
     .getattr  = ramfs_getattr,
+    .setattr  = ramfs_setattr,
     .readdir  = ramfs_readdir,
     .rename   = ramfs_rename,
 };

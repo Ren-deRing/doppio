@@ -295,6 +295,22 @@ int64_t sys_read(int fd, void *user_buf, size_t count) {
     return (int64_t)total;
 }
 
+static void fill_rdev(struct vnode *vn, struct stat *st) {
+    if (vn && S_ISCHR(st->st_mode)) {
+        if (strcmp(vn->v_name, "tty") == 0) {
+            st->st_rdev = (5 << 8) | 0;
+        } else if (strcmp(vn->v_name, "card0") == 0) {
+            st->st_rdev = (226 << 8) | 0;
+        } else if (strcmp(vn->v_name, "null") == 0) {
+            st->st_rdev = (1 << 8) | 3;
+        } else if (strcmp(vn->v_name, "fb0") == 0) {
+            st->st_rdev = (29 << 8) | 0;
+        } else if (strcmp(vn->v_name, "kbd") == 0) {
+            st->st_rdev = (13 << 8) | 64;
+        }
+    }
+}
+
 int64_t sys_fstat(int fd, void *user_statbuf) {
     if (fd < 0 || fd >= MAX_FILES) return -EBADF;
     if (!is_user_address_range(user_statbuf, sizeof(struct stat))) return -EFAULT;
@@ -326,7 +342,8 @@ int64_t sys_fstat(int fd, void *user_statbuf) {
         kst.st_dev = 1;
         kst.st_ino = (ino_t)vp;
         kst.st_blocks = (kst.st_size + 511) / 512;
-        dprintf("[sys_fstat] fd: %d (%s), mode: 0x%x, size: %ld, blksize: %ld, dev: %ld, ino: %ld\n", fd, vp->v_name, kst.st_mode, kst.st_size, kst.st_blksize, kst.st_dev, kst.st_ino);
+        fill_rdev(vp, &kst);
+        dprintf("[sys_fstat] fd: %d (%s), mode: 0x%x, size: %ld, blksize: %ld, dev: %ld, ino: %ld, rdev: %ld\n", fd, vp->v_name, kst.st_mode, kst.st_size, kst.st_blksize, kst.st_dev, kst.st_ino, kst.st_rdev);
     } else if (fd == 0 || fd == 1 || fd == 2) {
         kst.st_mode = S_IFCHR | 0666; 
         kst.st_blksize = 1024;
@@ -334,7 +351,8 @@ int64_t sys_fstat(int fd, void *user_statbuf) {
         kst.st_size = 0;
         kst.st_dev = 1;
         kst.st_ino = fd + 1;
-        dprintf("[sys_fstat] fd: %d (fallback), mode: 0x%x, size: %ld, blksize: %ld, dev: %ld, ino: %ld\n", fd, kst.st_mode, kst.st_size, kst.st_blksize, kst.st_dev, kst.st_ino);
+        kst.st_rdev = (5 << 8) | 0;
+        dprintf("[sys_fstat] fd: %d (fallback), mode: 0x%x, size: %ld, blksize: %ld, dev: %ld, ino: %ld, rdev: %ld\n", fd, kst.st_mode, kst.st_size, kst.st_blksize, kst.st_dev, kst.st_ino, kst.st_rdev);
     } else {
         dprintf("[sys_fstat] fd: %d (invalid/closed)\n", fd);
         return -EBADF;
@@ -392,6 +410,7 @@ int64_t sys_newfstatat(int dirfd, const char *user_path, void *user_statbuf, int
     kst.st_dev = 1;
     kst.st_ino = (ino_t)vn;
     kst.st_blocks = (kst.st_size + 511) / 512;
+    fill_rdev(vn, &kst);
 
     vput(vn);
 
@@ -439,6 +458,7 @@ int64_t sys_stat(const char *user_path, void *user_statbuf) {
     kst.st_dev = 1;
     kst.st_ino = (ino_t)vn;
     kst.st_blocks = (kst.st_size + 511) / 512;
+    fill_rdev(vn, &kst);
 
     vput(vn);
 
@@ -532,7 +552,24 @@ int64_t sys_flock(int fd, int operation) {
     return 0;
 }
 
+int64_t sys_ioctl_impl(int fd, uint64_t request_raw, void *arg);
+
 int64_t sys_ioctl(int fd, uint64_t request_raw, void *arg) {
+    int64_t ret = sys_ioctl_impl(fd, request_raw, arg);
+    const char *name = "unknown";
+    if (fd >= 0 && fd < MAX_FILES) {
+        struct file *f = curproc->p_fd_table[fd];
+        if (f && f->f_vn) {
+            name = f->f_vn->v_name;
+        } else if (fd == 0 || fd == 1 || fd == 2) {
+            name = "fallback-tty";
+        }
+    }
+    dprintf("[KERNEL sys_ioctl] fd=%d (%s), request=0x%lx, arg=%p -> ret=%ld\n", fd, name, request_raw, arg, ret);
+    return ret;
+}
+
+int64_t sys_ioctl_impl(int fd, uint64_t request_raw, void *arg) {
     uint32_t request = (uint32_t)request_raw;
     if (fd >= 0 && fd < MAX_FILES) {
         struct file *f = curproc->p_fd_table[fd];
@@ -628,6 +665,43 @@ int64_t sys_ioctl(int fd, uint64_t request_raw, void *arg) {
                     return 0;
                 }
                 else if (request == 0x5402 || request == 0x5403 || request == 0x5404) { // TCSETS / W / F
+                    return 0;
+                }
+                else if (request == 0x5603) { // VT_GETSTATE
+                    struct {
+                        unsigned short v_active;
+                        unsigned short v_signal;
+                        unsigned short v_state;
+                    } state = {0};
+                    state.v_active = 1;
+                    state.v_state = 1;
+                    if (!is_user_address_range(arg, sizeof(state))) return -EFAULT;
+                    if (copy_to_user(arg, &state, sizeof(state)) < 0) return -EFAULT;
+                    return 0;
+                }
+                else if (request == 0x5601) { // VT_GETMODE
+                    struct {
+                        char mode;
+                        char waitv;
+                        short relsig;
+                        char acqsig;
+                        char frsig;
+                    } mode = {0};
+                    mode.mode = 0;
+                    if (!is_user_address_range(arg, sizeof(mode))) return -EFAULT;
+                    if (copy_to_user(arg, &mode, sizeof(mode)) < 0) return -EFAULT;
+                    return 0;
+                }
+                else if (request == 0x5602 || request == 0x5605 || request == 0x5606 || request == 0x5607) { // VT_SETMODE / VT_RELDISP / VT_ACTIVATE / VT_WAITACTIVE
+                    return 0;
+                }
+                else if (request == 0x4B3A) { // KDSETMODE
+                    return 0;
+                }
+                else if (request == 0x4B3B) { // KDGETMODE
+                    int val = 0;
+                    if (!is_user_address_range(arg, sizeof(int))) return -EFAULT;
+                    if (copy_to_user(arg, &val, sizeof(int)) < 0) return -EFAULT;
                     return 0;
                 }
             }

@@ -41,6 +41,7 @@ struct vnode {
 
     struct vnode *v_parent;
     char v_name[32];
+    int  v_reclaimable;
 };
 
 static inline void vref(struct vnode *vn) {

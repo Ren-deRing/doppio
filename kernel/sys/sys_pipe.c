@@ -128,7 +128,6 @@ int64_t sys_pipe(int *user_pipefd) {
 }
 
 int64_t sys_pipe2(int *user_pipefd, int flags) {
-    (void)flags;
     if (!is_user_address_range(user_pipefd, sizeof(int) * 2)) {
         return -EFAULT;
     }
@@ -161,6 +160,12 @@ int64_t sys_pipe2(int *user_pipefd, int flags) {
     }
     rf->f_vn = r_vn;
     rf->f_flags = O_RDONLY;
+    if (flags & O_NONBLOCK) {
+        rf->f_flags |= O_NONBLOCK;
+    }
+    if (flags & 0x80000) { // O_CLOEXEC
+        rf->f_flags |= 0x80000;
+    }
 
     struct file *wf = file_alloc();
     if (!wf) {
@@ -170,6 +175,12 @@ int64_t sys_pipe2(int *user_pipefd, int flags) {
     }
     wf->f_vn = w_vn;
     wf->f_flags = O_WRONLY;
+    if (flags & O_NONBLOCK) {
+        wf->f_flags |= O_NONBLOCK;
+    }
+    if (flags & 0x80000) { // O_CLOEXEC
+        wf->f_flags |= 0x80000;
+    }
 
     int r_fd = proc_alloc_fd(curproc, rf);
     if (r_fd < 0) {

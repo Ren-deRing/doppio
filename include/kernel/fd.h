@@ -40,3 +40,4 @@ extern struct vnode_ops signalfd_ops;
 extern struct vnode_ops timerfd_ops;
 
 void timerfd_update_ticks(struct timerfd_buffer *tb, uint64_t now_ns);
+uint32_t check_fd_readiness(int fd, uint32_t events);

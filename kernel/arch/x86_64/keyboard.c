@@ -37,6 +37,14 @@ int keyboard_queue_pop(void) {
     return sc;
 }
 
+bool keyboard_has_data(void) {
+    cpu_status_t flags;
+    irq_save(flags);
+    bool has_data = (kbd_head != kbd_tail);
+    irq_restore(flags);
+    return has_data;
+}
+
 static void kbd_wait_write(void) {
     uint32_t timeout = 100000;
     while ((inb(0x64) & 0x02) && --timeout) {

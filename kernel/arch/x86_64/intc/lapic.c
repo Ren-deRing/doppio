@@ -39,7 +39,7 @@ void x86_lapic_set_periodic(uint32_t ms, uint8_t vector) {
 
     lapic_write(LAPIC_TICR, core->timer_ticks_per_ms * ms);
 
-    for(volatile int i=0; i<1000; i++); 
+    udelay(1);
     if (lapic_read(LAPIC_TCCR) == lapic_read(LAPIC_TICR)) {
         dprintf("Error: LAPIC Timer is NOT counting!\n");
     }

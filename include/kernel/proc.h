@@ -58,6 +58,14 @@ struct sigframe {
     uint8_t          sf_trampoline[16];
 } __attribute__((packed));
 
+struct posix_timer {
+    bool     pt_used;
+    int      pt_clock_id;
+    int      pt_sig_no;
+    uint64_t pt_interval_ns;
+    uint64_t pt_value_ns;
+};
+
 // TCB
 struct thread {
     tid_t            t_tid;
@@ -99,6 +107,7 @@ struct thread {
     struct thread   *t_proc_next;
     int             *t_clear_child_tid;
     uintptr_t        t_futex_addr;
+    struct posix_timer t_timers[8];
 };
 
 // PCB

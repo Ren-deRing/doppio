@@ -29,35 +29,23 @@ int main(int argc, char *argv[]) {
 
     pid_t ui_pid = fork();
     if (ui_pid == 0) {
-        char *ui_argv[] = {"/bin/ui", NULL};
-        char *ui_envp[] = {NULL};
-        execve("/bin/ui", ui_argv, ui_envp);
-        perror("[INIT] execve /bin/ui");
+        char *ui_argv[] = {"/bin/velox", NULL};
+        char *ui_envp[] = {"XDG_RUNTIME_DIR=/tmp", NULL};
+        execve("/bin/velox", ui_argv, ui_envp);
+        perror("[INIT] execve /bin/velox");
         _exit(127);
     }
 
     if (ui_pid < 0) {
-        perror("[INIT] fork /bin/ui");
+        perror("[INIT] fork /bin/velox");
     } else {
-        printf("[INIT] launched /bin/ui pid=%d\n", ui_pid);
+        printf("[INIT] launched /bin/velox pid=%d\n", ui_pid);
     }
-
-    while (1) {
-        int status = 0;
-        pid_t done = waitpid(ui_pid, &status, 0);
-        if (done == ui_pid) {
-            printf("[INIT] /bin/ui exited status=%d; restarting in 1s\n", status);
-            sleep(1);
-            ui_pid = fork();
-            if (ui_pid == 0) {
-                char *ui_argv[] = {"/bin/ui", NULL};
-                char *ui_envp[] = {NULL};
-                execve("/bin/ui", ui_argv, ui_envp);
-                _exit(127);
-            }
-        } else {
-            sleep(1);
-        }
+    int status = 0;
+    pid_t done = waitpid(ui_pid, &status, 0);
+    if (done == ui_pid) {
+        printf("[INIT] /bin/velox exited status=%d;\n", status);
+        sleep(1);
     }
 
     return 0;

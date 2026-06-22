@@ -8,6 +8,8 @@
 #include <kernel/fs/vfs.h>
 #include <kernel/fs/file.h>
 #include <kernel/fs/vnode.h>
+#include <kernel/fd.h>
+
 #include <string.h>
 
 #define AF_UNIX 1
@@ -353,6 +355,9 @@ int64_t sys_socket(int domain, int type, int protocol) {
         if (type & O_NONBLOCK) {
             f->f_flags |= O_NONBLOCK;
         }
+        if (type & 0x80000) { // SOCK_CLOEXEC
+            f->f_flags |= 0x80000;
+        }
 
         int fd = proc_alloc_fd(curproc, f);
         if (fd < 0) {
@@ -384,6 +389,12 @@ int64_t sys_socket(int domain, int type, int protocol) {
     }
     f->f_vn = vn;
     f->f_flags = O_RDWR;
+    if (type & O_NONBLOCK) {
+        f->f_flags |= O_NONBLOCK;
+    }
+    if (type & 0x80000) { // SOCK_CLOEXEC
+        f->f_flags |= 0x80000;
+    }
 
     int fd = proc_alloc_fd(curproc, f);
     if (fd < 0) {
@@ -1082,6 +1093,9 @@ int64_t sys_socketpair(int domain, int type, int protocol, int *user_sv) {
     if (type & O_NONBLOCK) {
         f1->f_flags |= O_NONBLOCK;
     }
+    if (type & 0x80000) { // SOCK_CLOEXEC
+        f1->f_flags |= 0x80000;
+    }
 
     struct file *f2 = file_alloc();
     if (!f2) {
@@ -1093,6 +1107,9 @@ int64_t sys_socketpair(int domain, int type, int protocol, int *user_sv) {
     f2->f_flags = O_RDWR;
     if (type & O_NONBLOCK) {
         f2->f_flags |= O_NONBLOCK;
+    }
+    if (type & 0x80000) { // SOCK_CLOEXEC
+        f2->f_flags |= 0x80000;
     }
 
     int fd1 = proc_alloc_fd(curproc, f1);
@@ -1130,6 +1147,9 @@ int64_t sys_accept4(int fd, void *user_addr, uint32_t *user_addrlen, int flags) 
         if (f) {
             if (flags & 0x800) { // SOCK_NONBLOCK / O_NONBLOCK
                 f->f_flags |= O_NONBLOCK;
+            }
+            if (flags & 0x80000) { // SOCK_CLOEXEC / O_CLOEXEC
+                f->f_flags |= 0x80000;
             }
         }
     }

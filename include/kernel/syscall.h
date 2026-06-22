@@ -97,6 +97,10 @@ int64_t sys_clock_getres(int clock_id, void *tp);
 int64_t sys_getrlimit(int resource, void *user_rlim);
 int64_t sys_arch_prctl(int code, uint64_t addr);
 int64_t sys_nanosleep(const struct timespec *user_req, struct timespec *user_rem);
+int64_t sys_timer_create(int clock_id, const void *sevp, int *timerid);
+int64_t sys_timer_settime(int timerid, int flags, const struct itimerspec *new_value, struct itimerspec *old_value);
+int64_t sys_timer_delete(int timerid);
+void    posix_timers_tick(void);
 
 // sys_shm.c, sys_sem.c
 int64_t sys_shmget(key_t key, size_t size, int shmflg);

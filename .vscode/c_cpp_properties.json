@@ -4,6 +4,7 @@
             "name": "Doppio (Mika)",
             "includePath": [
                 "${workspaceFolder}",
+                "${workspaceFolder}/lib",
                 "${workspaceFolder}/include",
                 "${workspaceFolder}/kernel",
                 "${workspaceFolder}/musl/build_out/include"

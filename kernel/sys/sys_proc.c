@@ -489,6 +489,23 @@ int64_t sys_execve(const char *user_path, char *const argv[], char *const envp[]
         return -EFAULT;
     }
 
+    struct file *to_close[MAX_FILES];
+    int to_close_cnt = 0;
+
+    uint64_t fd_lock_flags = spin_lock_irqsave(&curproc->p_lock);
+    for (int i = 0; i < MAX_FILES; i++) {
+        struct file *f = curproc->p_fd_table[i];
+        if (f && (f->f_flags & 0x80000)) { // 0x80000: O_CLOEXEC / SOCK_CLOEXEC
+            curproc->p_fd_table[i] = NULL;
+            to_close[to_close_cnt++] = f;
+        }
+    }
+    spin_unlock_irqrestore(&curproc->p_lock, fd_lock_flags);
+
+    for (int i = 0; i < to_close_cnt; i++) {
+        file_close(to_close[i]);
+    }
+
     page_table_t *old_map = curproc->p_vm_map;
     curproc->p_vm_map = new_map;
     curproc->p_entry = entry_point;

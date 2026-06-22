@@ -13,7 +13,7 @@
 #include <kernel/fs/vnode.h>
 #include <uapi/fcntl.h>
 #include <string.h>
-#include <kernel/sys_fd.h>
+#include <kernel/fd.h>
 
 #define POLLIN      0x001
 #define POLLPRI     0x002
@@ -56,7 +56,7 @@ struct unix_socket {
 
 extern struct vnode_ops unix_socket_ops;
 
-static uint32_t check_fd_readiness(int fd, uint32_t events) {
+uint32_t check_fd_readiness(int fd, uint32_t events) {
     struct file *f = curproc->p_fd_table[fd];
     if (!f) return POLLNVAL;
 
@@ -116,6 +116,12 @@ static uint32_t check_fd_readiness(int fd, uint32_t events) {
         }
     } else if (f->f_vn && strcmp(f->f_vn->v_name, "card0") == 0) {
         if (has_drm_event()) {
+            revents |= POLLIN;
+        }
+        revents |= (events & POLLOUT);
+    } else if (f->f_vn && (strcmp(f->f_vn->v_name, "kbd") == 0 || strcmp(f->f_vn->v_name, "tty") == 0)) {
+        extern bool keyboard_has_data(void);
+        if (keyboard_has_data()) {
             revents |= POLLIN;
         }
         revents |= (events & POLLOUT);

@@ -309,6 +309,9 @@ static void sched_boost(void) {
 }
 
 void sched_tick(void) {
+    extern void posix_timers_tick(void);
+    posix_timers_tick();
+
     uint64_t now = arch_get_system_ticks();
     
     spin_lock(&sleep_queue.lock);

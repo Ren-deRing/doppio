@@ -13,7 +13,7 @@
 #include <uapi/fcntl.h>
 #include <uapi/sys/stat.h>
 #include <string.h>
-#include <kernel/sys_fd.h>
+#include <kernel/fd.h>
 
 // ==================================== eventfd
 static ssize_t eventfd_read(struct vnode *vp, void *buf, size_t count, off_t off) {

@@ -116,7 +116,7 @@ static int pipe_getattr(struct vnode *vp, struct stat *st) {
     return 0;
 }
 
-static struct vnode_ops pipe_ops = {
+struct vnode_ops pipe_ops = {
     .read = pipe_read,
     .write = pipe_write,
     .inactive = pipe_inactive,

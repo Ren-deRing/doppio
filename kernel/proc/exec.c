@@ -2,6 +2,7 @@
 #include <kernel/mmu.h>
 #include <kernel/kmem.h>
 #include <kernel/proc.h>
+#include <kernel/vma.h>
 #include <kernel/cpu.h>
 #include <kernel/sched.h>
 
@@ -26,11 +27,7 @@ void arch_user_trampoline(void *arg) {
 
 int proc_exec(void *elf_data, char *const argv[], char *const envp[]) {
     Elf64_Ehdr *ehdr = (Elf64_Ehdr *)elf_data;
-    if (ehdr->e_type != ET_DYN) {
-        dprintf("[KERNEL proc_exec] Static/Non-PIE binaries are not supported.\n");
-        return -ENOEXEC;
-    }
-    uintptr_t main_binary_base = 0x00400000;
+    uintptr_t main_binary_base = (ehdr->e_type == ET_DYN) ? 0x00400000 : 0;
     uintptr_t original_entry = ehdr->e_entry + main_binary_base;
     uintptr_t entry_point = 0;
     uintptr_t brk = 0;
@@ -52,15 +49,23 @@ int proc_exec(void *elf_data, char *const argv[], char *const envp[]) {
     uintptr_t stack_top = USER_STACK_TOP;
     uintptr_t stack_bottom = stack_top - USER_STACK_SIZE;
 
-    for (uintptr_t curr = stack_bottom; curr < stack_top; curr += PAGE_SIZE) {
-        if (!mmu_map_demand(new_map, curr, MMU_FLAGS_USER | MMU_FLAGS_WRITE | MMU_FLAGS_EXEC)) {
-            return -ENOMEM;
-        }
+    struct vm_area *stack_vma = vma_alloc(stack_bottom, stack_top,
+        MMU_FLAGS_USER | MMU_FLAGS_READ | MMU_FLAGS_WRITE | MMU_FLAGS_EXEC, NULL, 0);
+    if (stack_vma) {
+        uint64_t vma_lk = spin_lock_irqsave(&p->p_vma_lock);
+        vma_insert(&p->p_vma_root, &p->p_vma_list, stack_vma);
+        spin_unlock_irqrestore(&p->p_vma_lock, vma_lk);
     }
 
     uintptr_t final_rsp = setup_user_stack(new_map, USER_STACK_TOP, argv, envp, phdr_vaddr, phnum, interpreter_base, original_entry);
 
+    page_table_t *old_map = p->p_vm_map;
     p->p_vm_map = new_map;
+    {
+        page_t *pg = phys_to_page(v2p(new_map));
+        if (pg) pg->pg_proc = p;
+    }
+    if (old_map) mmu_destroy_map(old_map);
     p->p_entry = entry_point;
     p->p_stack_top = final_rsp;
     p->p_brk = ALIGN_UP(brk, PAGE_SIZE);
@@ -191,6 +196,14 @@ uintptr_t setup_user_stack(page_table_t *new_map, uintptr_t user_stack_top,
 
     while (remain > 0) {
         uintptr_t phys = mmu_translate(new_map, copy_dest_u);
+        if (phys == 0) {
+            page_t *pg = page_alloc(0);
+            if (!pg) { kfree(kbuf); return 0; }
+            phys = page_to_phys(pg);
+            memset(p2v(phys), 0, PAGE_SIZE);
+            mmu_map_4k(new_map, copy_dest_u & ~(PAGE_SIZE - 1), phys,
+                MMU_FLAGS_USER | MMU_FLAGS_READ | MMU_FLAGS_WRITE | MMU_FLAGS_EXEC);
+        }
         size_t off_in_page = copy_dest_u % PAGE_SIZE;
         size_t to_copy = MIN(remain, PAGE_SIZE - off_in_page);
 

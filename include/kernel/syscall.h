@@ -92,6 +92,7 @@ void    handle_signal(struct trapframe *tf);
 
 // sys_sync.c
 int64_t sys_futex(uint32_t *uaddr, int op, uint32_t val, const void *timeout, uint32_t *uaddr2, uint32_t val3);
+int64_t sys_time(int64_t *tloc);
 int64_t sys_clock_gettime(int clock_id, void *tp);
 int64_t sys_clock_getres(int clock_id, void *tp);
 int64_t sys_getrlimit(int resource, void *user_rlim);
@@ -121,6 +122,7 @@ int64_t sys_connect(int fd, const void *user_addr, uint32_t addrlen);
 int64_t sys_sendmsg(int fd, const void *user_msg, int flags);
 int64_t sys_recvmsg(int fd, void *user_msg, int flags);
 int64_t sys_poll(void *user_fds, uint64_t nfds, int timeout);
+int64_t sys_select(int nfds, void *readfds, void *writefds, void *exceptfds, void *timeout, uint64_t sigsetsize);
 int64_t sys_ftruncate(int fd, int64_t length);
 int64_t sys_sendto(int fd, const void *user_buf, size_t len, int flags, const void *user_dest_addr, uint32_t addrlen);
 int64_t sys_recvfrom(int fd, void *user_buf, size_t len, int flags, void *user_src_addr, uint32_t *user_addrlen);

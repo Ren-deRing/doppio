@@ -162,6 +162,9 @@ int ramfs_create(struct vnode *dvp, const char *name, mode_t mode, struct vnode 
     entry->next = dnode->entries;
     dnode->entries = entry;
 
+    node->my_entry = entry;
+    node->parent_dv = dvp;
+
     vref(nvp);
     *vpp = nvp;
 
@@ -173,26 +176,25 @@ int ramfs_inactive(struct vnode *vp) {
     struct ramfs_node *node = (struct ramfs_node *)vp->data;
     if (!node) return 0;
 
-    if (node->unlinked) {
-        if (vp->type == S_IFDIR) {
-            struct ramfs_entry *curr = node->entries;
-            while (curr) {
-                struct ramfs_entry *next = curr->next;
-                kfree(curr);
-                curr = next;
-            }
+    if (node->unlinked && vp->type == S_IFDIR) {
+        struct ramfs_entry *curr = node->entries;
+        while (curr) {
+            struct ramfs_entry *next = curr->next;
+            kfree(curr);
+            curr = next;
         }
-        if (!node->is_static_buf && node->blocks) {
-            size_t num_blocks = (node->size + 4095) / 4096;
-            for (size_t i = 0; i < num_blocks; i++) {
-                if (node->blocks[i]) kfree(node->blocks[i]);
-            }
-            kfree(node->blocks);
-        }
-        kfree(node);
-        vp->data = NULL;
     }
 
+    if (!node->is_static_buf && node->blocks) {
+        size_t num_blocks = (node->size + 4095) / 4096;
+        for (size_t i = 0; i < num_blocks; i++) {
+            if (node->blocks[i]) kfree(node->blocks[i]);
+        }
+        kfree(node->blocks);
+    }
+
+    kfree(node);
+    vp->data = NULL;
     return 0;
 }
 
@@ -344,6 +346,7 @@ int ramfs_remove(struct vnode *dvp, const char *name) {
 
             struct ramfs_node *fnode = (struct ramfs_node *)curr->vn->data;
             fnode->unlinked = 1;
+            fnode->my_entry = NULL;
             curr->vn->v_reclaimable = 1;
 
             struct vnode *victim = curr->vn;

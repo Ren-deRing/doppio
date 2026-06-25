@@ -69,6 +69,13 @@ void proc_free(struct proc *p) {
         }
     }
 
+    // 모든 VMA Free
+    while (!list_empty(&p->p_vma_list)) {
+        struct vm_area *vma = vma_first(&p->p_vma_list);
+        vma_erase(&p->p_vma_root, &p->p_vma_list, vma);
+        vma_free(vma);
+    }
+
     if (p->p_vm_map && p->p_pid != 0) {
         mmu_destroy_map(p->p_vm_map);
         p->p_vm_map = NULL;
@@ -91,10 +98,12 @@ struct proc* proc_create(pid_t pid) {
     p->p_pid = pid;
     spin_lock_init(&p->p_lock);
     spin_lock_init(&p->p_vm_lock);
+    spin_lock_init(&p->p_vma_lock);
     p->p_active_cpus = 0;
 
     list_init(&p->p_children);
     list_init(&p->p_wait_queue);
+    list_init(&p->p_vma_list);
     p->p_exit_status = 0;
     p->p_refcnt = 1;
 

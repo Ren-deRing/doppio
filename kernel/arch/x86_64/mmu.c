@@ -21,6 +21,7 @@
 static spinlock_t g_kernel_mmu_lock = SPINLOCK_INITIALIZER;
 
 #include <kernel/proc.h>
+#include <kernel/vma.h>
 
 static inline spinlock_t* mmu_get_lock(page_table_t* map) {
     if (!map) return &g_kernel_mmu_lock;
@@ -50,7 +51,6 @@ void handle_page_fault(struct trapframe *regs, void *data);
 #define X86_PTE_NX       (1ULL << 63)
 #define X86_PTE_COW      (1ULL << 9)
 #define X86_PTE_SHARED   (1ULL << 10)
-#define X86_PTE_DEMAND   (1ULL << 11)
 
 #define PAGE_ADDR_MASK   0x000ffffffffff000ull
 
@@ -521,8 +521,8 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
     if (*entries[2] & X86_PTE_HUGE) {
         uint64_t phys = *entries[2] & PAGE_ADDR_MASK;
         page_t* page = phys_to_page(phys);
-        if (page && page->ref_count > 0) {
-            page->ref_count--;
+        if (page) {
+            if (page->ref_count > 0) page->ref_count--;
             if (page->ref_count == 0) {
                 page_free(page, 9);
             }
@@ -530,25 +530,17 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
 
         *entries[2] = 0;
         invlpg(virt);
-
-        for (int i = 2; i > 0; i--) {
-            page_t* table_page = phys_to_page(v2p(tables[i]));
-            if (--table_page->ref_count == 0) {
-                *entries[i-1] = 0;
-                pmm_free_pages(table_page, 0);
-            } else break;
-        }
         return;
     }
 
     tables[3] = (page_table_t*)ENTRY_TO_VIRT(*entries[2]);
     entries[3] = &tables[3]->entries[idxs[3]];
-    if (!(*entries[3] & X86_PTE_PRESENT) && !(*entries[3] & X86_PTE_DEMAND)) return;
+    if (!(*entries[3] & X86_PTE_PRESENT)) return;
 
     uint64_t phys = *entries[3] & PAGE_ADDR_MASK;
     page_t* page = phys_to_page(phys);
-    if (page && (*entries[3] & X86_PTE_PRESENT) && page->ref_count > 0) {
-        page->ref_count--;
+    if (page) {
+        if (page->ref_count > 0) page->ref_count--;
         if (page->ref_count == 0) {
             page_free(page, 0);
         }
@@ -556,14 +548,6 @@ void vmm_unmap(page_table_t* pml4, uint64_t virt) {
 
     *entries[3] = 0;
     invlpg(virt);
-
-    for (int i = 3; i > 0; i--) {
-        page_t* table_page = phys_to_page(v2p(tables[i]));
-        if (--table_page->ref_count == 0) {
-            *entries[i-1] = 0;
-            pmm_free_pages(table_page, 0);
-        } else break;
-    }
 }
 
 page_table_t* vmm_get_current_pml4(void) {
@@ -633,11 +617,11 @@ void vmm_destroy_map(page_table_t* pml4) {
                 if (pde & X86_PTE_HUGE) {
                     uint64_t phys = pde & PAGE_ADDR_MASK;
                     page_t *pg = phys_to_page(phys);
-                    if (pg && pg->ref_count > 0) {
-                        pg->ref_count--;
-                        if (pg->ref_count == 0) {
+                    if (pg) {
+                        if (pg->ref_count > 0)
+                            pg->ref_count--;
+                        if (pg->ref_count == 0)
                             page_free(pg, 9);
-                        }
                     }
                     continue;
                 }
@@ -648,11 +632,11 @@ void vmm_destroy_map(page_table_t* pml4) {
                     if (pte & X86_PTE_PRESENT) {
                         uint64_t phys = pte & PAGE_ADDR_MASK;
                         page_t *pg = phys_to_page(phys);
-                        if (pg && pg->ref_count > 0) {
-                            pg->ref_count--;
-                            if (pg->ref_count == 0) {
+                        if (pg) {
+                            if (pg->ref_count > 0)
+                                pg->ref_count--;
+                            if (pg->ref_count == 0)
                                 page_free(pg, 0);
-                            }
                         }
                     }
                 }
@@ -737,33 +721,6 @@ bool mmu_map_4k(page_table_t* map, uintptr_t vaddr, uintptr_t paddr, uint64_t pr
     return ret;
 }
 
-bool mmu_map_demand(page_table_t* map, uintptr_t vaddr, uint64_t prot) {
-    uint64_t x86_flags = mmu_to_x86_flags(prot);
-    
-    x86_flags &= ~X86_PTE_PRESENT;
-    x86_flags |= X86_PTE_DEMAND;
-
-    spinlock_t* lock = mmu_get_lock(map);
-    uint64_t lock_flags = spin_lock_irqsave(lock);
-    pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, true);
-    if (!pte) {
-        spin_unlock_irqrestore(lock, lock_flags);
-        return false;
-    }
-
-    if (!(*pte & X86_PTE_PRESENT) && !(*pte & X86_PTE_DEMAND)) {
-        uintptr_t pt_vaddr = ALIGN_DOWN((uintptr_t)pte, PAGE_SIZE);
-        page_t* pt_page = phys_to_page(v2p((void*)pt_vaddr));
-        if (pt_page) pt_page->ref_count++;
-    }
-
-    *pte = x86_flags;
-    spin_unlock_irqrestore(lock, lock_flags);
-
-    mmu_tlb_shootdown_ex(map, vaddr);
-    return true;
-}
-
 void mmu_unmap(page_table_t* map, uintptr_t vaddr) {
     spinlock_t* lock = mmu_get_lock(map);
     uint64_t lock_flags = spin_lock_irqsave(lock);
@@ -776,26 +733,6 @@ void mmu_unmap(page_table_t* map, uintptr_t vaddr) {
 uintptr_t mmu_translate(page_table_t* map, uintptr_t vaddr) {
     if (!map) return 0;
     uint64_t phys = vmm_get_phys(map, (uint64_t)vaddr);
-    if (phys == 0) {
-        spinlock_t* lock = mmu_get_lock(map);
-        uint64_t lock_flags = spin_lock_irqsave(lock);
-        pt_entry_t *pte = vmm_get_pte(map, (uint64_t)vaddr, false);
-        if (pte && (*pte & X86_PTE_DEMAND) && !(*pte & X86_PTE_PRESENT)) {
-            page_t *pg = page_alloc(0);
-            if (pg) {
-                phys = page_to_phys(pg);
-                memset(p2v(phys), 0, PAGE_SIZE);
-
-                uint64_t original_flags = *pte;
-                original_flags &= ~X86_PTE_DEMAND;
-                original_flags |= X86_PTE_PRESENT;
-
-                *pte = phys | original_flags;
-                invlpg((uint64_t)vaddr);
-            }
-        }
-        spin_unlock_irqrestore(lock, lock_flags);
-    }
     return (uintptr_t)phys;
 }
 
@@ -812,13 +749,8 @@ void mmu_protect_page(page_table_t* map, uintptr_t vaddr, int prot) {
     uint64_t lock_flags = spin_lock_irqsave(lock);
     pt_entry_t* pte = vmm_get_pte(map, (uint64_t)vaddr, false);
     
-    if (pte && ((*pte & X86_PTE_PRESENT) || (*pte & X86_PTE_DEMAND))) {
-        uint64_t new_flags = X86_PTE_USER;
-        if (*pte & X86_PTE_PRESENT) {
-            new_flags |= X86_PTE_PRESENT;
-        } else {
-            new_flags |= X86_PTE_DEMAND;
-        }
+    if (pte && (*pte & X86_PTE_PRESENT)) {
+        uint64_t new_flags = X86_PTE_PRESENT | X86_PTE_USER;
         
         if (prot & 0x2) { // PROT_WRITE
             new_flags |= X86_PTE_WRITABLE;
@@ -891,10 +823,6 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
                 for (int l = 0; l < 512; l++) {
                     pt_entry_t pte = pt->entries[l];
                     if (!(pte & X86_PTE_PRESENT)) {
-                        if (pte & X86_PTE_DEMAND) {
-                            uint64_t va = ((uint64_t)i << 39) | ((uint64_t)j << 30) | ((uint64_t)k << 21) | ((uint64_t)l << 12);
-                            vmm_map(child_map, va, 0, pte);
-                        }
                         continue;
                     }
 
@@ -909,11 +837,6 @@ page_table_t *mmu_clone_map(page_table_t *parent_map) {
                             pt->entries[l] = parent_phys | flags;
                             invlpg((uint64_t)va);
                         }
-                    }
-
-                    page_t *pg = phys_to_page(parent_phys);
-                    if (pg) {
-                        pg->ref_count++;
                     }
 
                     vmm_map(child_map, va, parent_phys, flags);
@@ -939,33 +862,54 @@ void handle_page_fault(struct trapframe *regs, void *data) {
     uintptr_t fault_addr = read_cr2() & ~0xFFF;
     uint64_t err_code = regs->err_code;
 
-    // Bit 0 (P) = Present, Bit 1 (W/R) = Write
-    if ((err_code & 1) == 0) { // Page not present
+    // Not present
+    if ((err_code & 1) == 0) {
         page_table_t *map = mmu_get_active_map();
-        if (map) {
-            spinlock_t* lock = mmu_get_lock(map);
-            uint64_t lock_flags = spin_lock_irqsave(lock);
-            pt_entry_t *pte = vmm_get_pte(map, fault_addr, false);
-            if (pte && (*pte & X86_PTE_DEMAND) && !(*pte & X86_PTE_PRESENT)) {
-                page_t *pg = page_alloc(0);
-                if (!pg) {
-                    spin_unlock_irqrestore(lock, lock_flags);
-                    panic("Demand Paging: Out of physical memory", regs);
+        if (map && curproc) {
+            uint32_t vma_flags = 0;
+            uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+            struct vm_area *vma = vma_find(curproc->p_vma_root, fault_addr);
+            if (vma) {
+                vma_flags = vma->flags;
+            }
+            spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
+
+            if (vma) {
+                uintptr_t phys = vma_resolve_fault(curproc, fault_addr);
+
+                if (phys == 0) {
+                    page_t *pg = page_alloc(0);
+                    if (pg) {
+                        phys = page_to_phys(pg);
+                        memset(p2v(phys), 0, PAGE_SIZE);
+                    }
                 }
-                uint64_t phys_addr = page_to_phys(pg);
-                memset(p2v(phys_addr), 0, PAGE_SIZE);
 
-                uint64_t original_flags = *pte;
-                original_flags &= ~X86_PTE_DEMAND;
-                original_flags |= X86_PTE_PRESENT;
+                if (phys == 0) {
+                    panic("Page fault: Out of physical memory", regs);
+                }
 
-                *pte = phys_addr | original_flags;
+                uint64_t x86_flags = mmu_to_x86_flags(vma_flags);
+                spinlock_t* pt_lock = mmu_get_lock(map);
+                uint64_t pt_flags = spin_lock_irqsave(pt_lock);
 
-                invlpg((uint64_t)fault_addr);
-                spin_unlock_irqrestore(lock, lock_flags);
+                pt_entry_t *pte = vmm_get_pte(map, fault_addr, true);
+                if (pte && !(*pte & X86_PTE_PRESENT)) {
+                    uintptr_t pt_vaddr = ALIGN_DOWN((uintptr_t)pte, PAGE_SIZE);
+                    page_t* pt_page = phys_to_page(v2p((void*)pt_vaddr));
+                    if (pt_page) pt_page->ref_count++;
+                    *pte = phys | x86_flags;
+                    page_t *mapped = phys_to_page(phys);
+                    if (mapped) mapped->ref_count++;
+                    invlpg(fault_addr);
+                } else {
+                    page_free(phys_to_page(phys), 0);
+                }
+
+                spin_unlock_irqrestore(pt_lock, pt_flags);
+                mmu_tlb_shootdown_ex(map, fault_addr);
                 return;
             }
-            spin_unlock_irqrestore(lock, lock_flags);
         }
     }
 
@@ -1002,6 +946,7 @@ void handle_page_fault(struct trapframe *regs, void *data) {
                                 *re_pte = new_phys | flags;
                                 
                                 pg->ref_count--;
+                                new_pg->ref_count++;
                             } else {
                                 uint64_t flags = *re_pte & ~PAGE_ADDR_MASK;
                                 flags &= ~X86_PTE_COW;
@@ -1092,7 +1037,7 @@ bool mmu_is_mapped(page_table_t* map, uintptr_t virt) {
     uint64_t lock_flags = spin_lock_irqsave(lock);
     pt_entry_t *pte = vmm_get_pte(map, (uint64_t)virt, false);
     bool ret = false;
-    if (pte && (*pte & (X86_PTE_PRESENT | X86_PTE_DEMAND))) {
+    if (pte && (*pte & X86_PTE_PRESENT)) {
         ret = true;
     }
     spin_unlock_irqrestore(lock, lock_flags);
@@ -1105,7 +1050,7 @@ uint64_t mmu_get_flags(page_table_t* map, uintptr_t virt) {
     uint64_t lock_flags = spin_lock_irqsave(lock);
     pt_entry_t *pte = vmm_get_pte(map, (uint64_t)virt, false);
     uint64_t flags = 0;
-    if (pte && ((*pte & X86_PTE_PRESENT) || (*pte & X86_PTE_DEMAND))) {
+    if (pte && (*pte & X86_PTE_PRESENT)) {
         flags |= MMU_FLAGS_READ;
         if (*pte & X86_PTE_WRITABLE) {
             flags |= MMU_FLAGS_WRITE;

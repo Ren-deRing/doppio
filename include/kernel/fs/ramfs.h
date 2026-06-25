@@ -23,6 +23,9 @@ struct ramfs_node {
 
     int unlinked;
     struct ramfs_entry *entries;
+
+    struct ramfs_entry *my_entry;
+    struct vnode *parent_dv;
 };
 extern struct vnode_ops ramfs_ops;
 

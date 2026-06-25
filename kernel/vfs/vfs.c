@@ -376,49 +376,53 @@ int vfs_open(const char *path, int flags, mode_t mode, int *fd_out) {
 }
 
 int vfs_close(int fd) {
-    if (!curthread || !curthread->t_proc) return -ESRCH;
-    struct proc *p = curthread->t_proc;
+    struct proc *p = curproc;
+    if (fd < 0 || fd >= MAX_FILES) return -EBADF;
 
-    if (fd < 0 || fd >= MAX_FILES || p->p_fd_table[fd] == NULL) {
-        return -EBADF;
-    }
-
+    uint64_t flags = spin_lock_irqsave(&p->p_lock);
     struct file *f = p->p_fd_table[fd];
+    if (!f) { spin_unlock_irqrestore(&p->p_lock, flags); return -EBADF; }
     p->p_fd_table[fd] = NULL;
+    spin_unlock_irqrestore(&p->p_lock, flags);
 
     file_close(f);
     return 0;
 }
 
 int vfs_write(int fd, const void *buf, size_t count) {
-    struct proc *p = curproc;
-    if (fd < 0 || fd >= MAX_FILES || !p->p_fd_table[fd]) return -EBADF;
+    struct file *f = fdget(fd);
+    if (!f) return -EBADF;
 
-    struct file *f = p->p_fd_table[fd];
-    if (!f->f_vn->ops->write) return -ENOSYS;
+    if (!f->f_vn || !f->f_vn->ops || !f->f_vn->ops->write) {
+        fdput(f); return -ENOSYS;
+    }
 
     int n = f->f_vn->ops->write(f->f_vn, buf, count, f->f_pos);
-    if (n > 0) f->f_pos += n; // 쓴만큼 포인터 전진
+    if (n > 0) f->f_pos += n;
+    fdput(f);
     return n;
 }
 
 int vfs_read(int fd, void *buf, size_t count) {
-    struct proc *p = curproc;
-    if (fd < 0 || fd >= MAX_FILES || !p->p_fd_table[fd]) return -EBADF;
+    struct file *f = fdget(fd);
+    if (!f) return -EBADF;
 
-    struct file *f = p->p_fd_table[fd];
-    if (!f->f_vn->ops->read) return -ENOSYS;
+    if (!f->f_vn || !f->f_vn->ops || !f->f_vn->ops->read) {
+        fdput(f); return -ENOSYS;
+    }
 
     int n = f->f_vn->ops->read(f->f_vn, buf, count, f->f_pos);
-    if (n > 0) f->f_pos += n; // 읽은만큼 포인터 전진
+    if (n > 0) f->f_pos += n;
+    fdput(f);
     return n;
 }
 
 int vfs_lseek(int fd, off_t offset, int whence) {
-    struct proc *p = curproc;
-    if (fd < 0 || fd >= MAX_FILES || !p->p_fd_table[fd]) return -EBADF;
+    struct file *f = fdget(fd);
+    if (!f) return -EBADF;
 
-    struct file *f = p->p_fd_table[fd];
+    if (!f->f_vn || !f->f_vn->ops) { fdput(f); return -ENOSYS; }
+
     struct vnode *vp = f->f_vn;
     off_t new_pos = f->f_pos;
 
@@ -430,31 +434,34 @@ int vfs_lseek(int fd, off_t offset, int whence) {
             if (vp->ops->getattr) {
                 vp->ops->getattr(vp, &st);
                 new_pos = st.st_size + offset;
-            } else {
-                return -ENOTSUP;
+                break;
             }
-            break;
+            fdput(f);
+            return -ENOTSUP;
         }
-        default: return -EINVAL;
+        default: fdput(f); return -EINVAL;
     }
 
-    if (new_pos < 0) return -EINVAL;
+    if (new_pos < 0) { fdput(f); return -EINVAL; }
+
     f->f_pos = new_pos;
+    fdput(f);
     return (int)new_pos;
 }
 
 int vfs_readdir(int fd, void *buf, size_t count) {
-    struct proc *p = curproc;
-    if (fd < 0 || fd >= MAX_FILES || !p->p_fd_table[fd]) return -EBADF;
+    struct file *f = fdget(fd);
+    if (!f) return -EBADF;
 
-    struct file *f = p->p_fd_table[fd];
+    if (!f->f_vn || !f->f_vn->ops) { fdput(f); return -ENOSYS; }
+
     struct vnode *vp = f->f_vn;
 
-    if (vp->type != S_IFDIR) return -ENOTDIR;
-    if (!vp->ops->readdir) return -ENOSYS;
+    if (vp->type != S_IFDIR) { fdput(f); return -ENOTDIR; }
+    if (!vp->ops->readdir) { fdput(f); return -ENOSYS; }
 
     int n = vp->ops->readdir(vp, buf, count, &f->f_pos);
-    
+    fdput(f);
     return n;
 }
 

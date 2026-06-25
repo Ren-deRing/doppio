@@ -1,6 +1,7 @@
 #include <uapi/errno.h>
 #include <kernel/printf.h>
 #include <kernel/mmu.h>
+#include <kernel/vma.h>
 #include <kernel/cpu.h>
 #include <kernel/proc.h>
 #include <kernel/sched.h>
@@ -14,6 +15,7 @@
 
 #include <kernel/fs/vfs.h>
 #include <kernel/fs/vnode.h>
+#include <kernel/vma.h>
 
 #include <string.h>
 
@@ -132,7 +134,7 @@ int64_t sys_clone(uint64_t flags, void *child_stack, void *ptid, void *ctid, uin
         for (int i = 0; i < MAX_FILES; i++) {
             if (parent_p->p_fd_table[i] != NULL) {
                 child_p->p_fd_table[i] = parent_p->p_fd_table[i];
-                child_p->p_fd_table[i]->f_refcnt++; 
+                __atomic_fetch_add(&child_p->p_fd_table[i]->f_refcnt, 1, __ATOMIC_SEQ_CST);
             } else {
                 child_p->p_fd_table[i] = NULL;
             }
@@ -266,23 +268,33 @@ int64_t sys_fork(void) {
     uint64_t lock_flags = spin_lock_irqsave(&parent_p->p_lock);
     for (int i = 0; i < MAX_FILES; i++) {
         if (parent_p->p_fd_table[i] != NULL) {
-            child_p->p_fd_table[i] = parent_p->p_fd_table[i];
-            child_p->p_fd_table[i]->f_refcnt++; 
-        } else {
-            child_p->p_fd_table[i] = NULL;
+                child_p->p_fd_table[i] = parent_p->p_fd_table[i];
+                __atomic_fetch_add(&child_p->p_fd_table[i]->f_refcnt, 1, __ATOMIC_SEQ_CST);
+            } else {
+                child_p->p_fd_table[i] = NULL;
+            }
         }
-    }
-    spin_unlock_irqrestore(&parent_p->p_lock, lock_flags);
+        spin_unlock_irqrestore(&parent_p->p_lock, lock_flags);
 
-    child_p->p_vm_map = mmu_clone_map(parent_p->p_vm_map);
-    if (!child_p->p_vm_map) {
-        goto err_proc;
-    }
-    if (child_p->p_vm_map) {
+        child_p->p_vm_map = mmu_clone_map(parent_p->p_vm_map);
+        if (!child_p->p_vm_map) {
+            goto err_proc;
+        }
+        if (child_p->p_vm_map) {
         page_t* pg = phys_to_page(v2p(child_p->p_vm_map));
         if (pg) {
             pg->pg_proc = child_p;
         }
+    }
+
+    // VMA 트리 Clone
+    struct vm_area *vma;
+    vma_for_each(vma, &parent_p->p_vma_list) {
+        struct vm_area *clone = vma_alloc(vma->start, vma->end,
+                                          vma->flags, vma->vn,
+                                          vma->file_offset);
+        if (!clone) goto err_proc;
+        vma_insert(&child_p->p_vma_root, &child_p->p_vma_list, clone);
     }
     
     extern void shm_fork_copy(struct proc *parent, struct proc *child);
@@ -474,12 +486,12 @@ int64_t sys_execve(const char *user_path, char *const argv[], char *const envp[]
     uintptr_t stack_top = USER_STACK_TOP;
     uintptr_t stack_bottom = USER_STACK_TOP - USER_STACK_SIZE;
 
-    for (uintptr_t curr = stack_bottom; curr < stack_top; curr += PAGE_SIZE) {
-        if (!mmu_map_demand(new_map, curr, MMU_FLAGS_USER | MMU_FLAGS_WRITE)) {
-            dprintf("Memory Allocation for User Stack FAILED.\n");
-            mmu_destroy_map(new_map);
-            return -ENOMEM;
-        }
+    struct vm_area *stack_vma = vma_alloc(stack_bottom, stack_top,
+        MMU_FLAGS_USER | MMU_FLAGS_READ | MMU_FLAGS_WRITE, NULL, 0);
+    if (stack_vma) {
+        uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+        vma_insert(&curproc->p_vma_root, &curproc->p_vma_list, stack_vma);
+        spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
     }
 
     uintptr_t final_user_rsp = setup_user_stack(new_map, USER_STACK_TOP, argv, envp, phdr_vaddr, phnum, interpreter_base, original_entry);
@@ -508,6 +520,10 @@ int64_t sys_execve(const char *user_path, char *const argv[], char *const envp[]
 
     page_table_t *old_map = curproc->p_vm_map;
     curproc->p_vm_map = new_map;
+    {
+        page_t *pg = phys_to_page(v2p(new_map));
+        if (pg) pg->pg_proc = curproc;
+    }
     curproc->p_entry = entry_point;
     curproc->p_brk = ALIGN_UP(brk, PAGE_SIZE);
     curproc->p_stack_top = USER_STACK_TOP;

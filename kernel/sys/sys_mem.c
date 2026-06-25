@@ -10,9 +10,11 @@
 #include <kernel/fs/vnode.h>
 #include <kernel/fs/file.h>
 #include <kernel/lock.h>
+#include <kernel/vma.h>
 
 #include <string.h>
 
+// Shared-page cache
 struct shared_page_entry {
     struct vnode *vn;
     int64_t file_offset;
@@ -27,7 +29,6 @@ static void cleanup_stale_shared_pages_unlocked(void) {
     struct vnode *to_put[32];
     int count = 0;
 
-    uint64_t lock_flags = spin_lock_irqsave(&g_shared_pages_lock);
     for (int s = 0; s < MAX_SHARED_PAGES; s++) {
         if (g_shared_pages[s].vn != NULL) {
             uintptr_t cached_paddr = g_shared_pages[s].phys_addr;
@@ -37,19 +38,93 @@ static void cleanup_stale_shared_pages_unlocked(void) {
                 g_shared_pages[s].vn = NULL;
                 g_shared_pages[s].file_offset = 0;
                 g_shared_pages[s].phys_addr = 0;
-                
+                if (pg->ref_count > 0) pg->ref_count--;
+
                 to_put[count++] = vn;
-                if (count == 32) {
-                    break;
-                }
+                if (count == 32) break;
             }
         }
     }
-    spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
 
     for (int i = 0; i < count; i++) {
         vput(to_put[i]);
     }
+}
+
+uintptr_t vma_shared_lookup(struct vnode *vn, int64_t offset) {
+    uint64_t flags = spin_lock_irqsave(&g_shared_pages_lock);
+    int entry_count = 0;
+    for (int s = 0; s < MAX_SHARED_PAGES; s++) {
+        if (g_shared_pages[s].vn != NULL) entry_count++;
+        if (g_shared_pages[s].vn == vn && g_shared_pages[s].file_offset == offset) {
+            uintptr_t cached_paddr = g_shared_pages[s].phys_addr;
+            page_t *pg = phys_to_page(cached_paddr);
+            if (pg && pg->is_free) {
+                g_shared_pages[s].vn = NULL;
+                g_shared_pages[s].file_offset = 0;
+                g_shared_pages[s].phys_addr = 0;
+                if (pg->ref_count > 0) pg->ref_count--;
+                spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+                vput(vn);
+                return 0;
+            }
+            spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+            return cached_paddr;
+        }
+    }
+    spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+    return 0;
+}
+
+void vma_shared_register(struct vnode *vn, int64_t offset, uintptr_t phys) {
+    cleanup_stale_shared_pages_unlocked();
+
+    uint64_t flags = spin_lock_irqsave(&g_shared_pages_lock);
+
+    for (int s = 0; s < MAX_SHARED_PAGES; s++) {
+        if (g_shared_pages[s].vn == vn && g_shared_pages[s].file_offset == offset) {
+            spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+            return;
+        }
+    }
+
+    for (int s = 0; s < MAX_SHARED_PAGES; s++) {
+        if (g_shared_pages[s].vn == NULL) {
+            g_shared_pages[s].vn = vn;
+            vref(vn);
+            g_shared_pages[s].file_offset = offset;
+            g_shared_pages[s].phys_addr = phys;
+            page_t *pg = phys_to_page(phys);
+            if (pg) pg->ref_count++;
+            spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+            return;
+        }
+    }
+
+    spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+}
+
+void vma_shared_unregister(struct vnode *vn, int64_t offset) {
+    uint64_t flags = spin_lock_irqsave(&g_shared_pages_lock);
+    for (int s = 0; s < MAX_SHARED_PAGES; s++) {
+        if (g_shared_pages[s].vn == vn && g_shared_pages[s].file_offset == offset) {
+            uintptr_t paddr = g_shared_pages[s].phys_addr;
+            struct vnode *to_put = g_shared_pages[s].vn;
+            g_shared_pages[s].vn = NULL;
+            g_shared_pages[s].file_offset = 0;
+            g_shared_pages[s].phys_addr = 0;
+            spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+            page_t *pg = phys_to_page(paddr);
+            if (pg && pg->ref_count > 0) pg->ref_count--;
+            vput(to_put);
+            return;
+        }
+    }
+    spin_unlock_irqrestore(&g_shared_pages_lock, flags);
+}
+
+void vma_shared_cleanup(void) {
+    cleanup_stale_shared_pages_unlocked();
 }
 
 int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int64_t offset) {
@@ -71,7 +146,7 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
                 while (1) {
                     bool range_free = true;
                     for (uintptr_t off = 0; off < aligned_fb_len; off += PAGE_SIZE) {
-                        if (mmu_translate(curproc->p_vm_map, addr + off) != 0) {
+                        if (mmu_is_mapped(curproc->p_vm_map, addr + off)) {
                             range_free = false;
                             addr = ALIGN_UP(addr + off + PAGE_SIZE, PAGE_SIZE);
                             break;
@@ -110,8 +185,7 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
         uintptr_t start_unmap = ALIGN_DOWN(addr, PAGE_SIZE);
         uintptr_t end_unmap = ALIGN_UP(addr + length, PAGE_SIZE);
         for (uintptr_t i = start_unmap; i < end_unmap; i += PAGE_SIZE) {
-            uintptr_t paddr = mmu_translate(curproc->p_vm_map, i);
-            if (paddr != 0) {
+            if (mmu_is_mapped(curproc->p_vm_map, i)) {
                 mmu_unmap(curproc->p_vm_map, i);
             }
         }
@@ -123,7 +197,7 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
             need_search = true;
         } else {
             for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-                if (mmu_translate(curproc->p_vm_map, i) != 0) {
+                if (mmu_is_mapped(curproc->p_vm_map, i)) {
                     need_search = true;
                     break;
                 }
@@ -137,17 +211,30 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
 
         while (search_start < curproc->p_mmap_base) {
             bool range_free = true;
-            for (uintptr_t offset_val = 0; offset_val < aligned_len; offset_val += PAGE_SIZE) {
-                if (mmu_translate(curproc->p_vm_map, search_start + offset_val) != 0) {
+            uintptr_t search_end = search_start + aligned_len;
+
+            // PTE 체크
+            for (uintptr_t off = 0; off < aligned_len; off += PAGE_SIZE) {
+                if (mmu_is_mapped(curproc->p_vm_map, search_start + off)) {
                     range_free = false;
-                    search_start = ALIGN_UP(search_start + offset_val + PAGE_SIZE, PAGE_SIZE);
+                    search_start = ALIGN_UP(search_start + off + PAGE_SIZE, PAGE_SIZE);
                     break;
                 }
             }
-            if (range_free) {
-                found_addr = search_start;
-                break;
+            if (!range_free) continue;
+
+            // VMA 체크
+            uint64_t lk = spin_lock_irqsave(&curproc->p_vma_lock);
+            struct vm_area *existing = vma_find_first(curproc->p_vma_root, search_start);
+            if (existing && existing->start < search_end) {
+                range_free = false;
+                search_start = ALIGN_UP(existing->end, PAGE_SIZE);
             }
+            spin_unlock_irqrestore(&curproc->p_vma_lock, lk);
+            if (!range_free) continue;
+
+            found_addr = search_start;
+            break;
         }
 
         if (found_addr != 0) {
@@ -156,16 +243,27 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
             uintptr_t fallback_start = curproc->p_mmap_base;
             while (1) {
                 bool range_free = true;
-                for (uintptr_t offset_val = 0; offset_val < aligned_len; offset_val += PAGE_SIZE) {
-                    if (mmu_translate(curproc->p_vm_map, fallback_start + offset_val) != 0) {
+                uintptr_t search_end = fallback_start + aligned_len;
+
+                for (uintptr_t off = 0; off < aligned_len; off += PAGE_SIZE) {
+                    if (mmu_is_mapped(curproc->p_vm_map, fallback_start + off)) {
                         range_free = false;
-                        fallback_start = ALIGN_UP(fallback_start + offset_val + PAGE_SIZE, PAGE_SIZE);
+                        fallback_start = ALIGN_UP(fallback_start + off + PAGE_SIZE, PAGE_SIZE);
                         break;
                     }
                 }
-                if (range_free) {
-                    break;
+                if (!range_free) continue;
+
+                uint64_t lk = spin_lock_irqsave(&curproc->p_vma_lock);
+                struct vm_area *existing = vma_find_first(curproc->p_vma_root, fallback_start);
+                if (existing && existing->start < search_end) {
+                    range_free = false;
+                    fallback_start = ALIGN_UP(existing->end, PAGE_SIZE);
                 }
+                spin_unlock_irqrestore(&curproc->p_vma_lock, lk);
+                if (!range_free) continue;
+
+                break;
             }
             addr = fallback_start;
             curproc->p_mmap_base = fallback_start + aligned_len;
@@ -175,12 +273,11 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
     uintptr_t start = ALIGN_DOWN(addr, PAGE_SIZE);
     uintptr_t end = ALIGN_UP(addr + length, PAGE_SIZE);
 
-    struct file *f = NULL;
     struct vnode *mapped_vn = NULL;
 
     if (fd >= 0 && fd < MAX_FILES) {
         uint64_t proc_flags = spin_lock_irqsave(&curproc->p_lock);
-        f = curproc->p_fd_table[fd];
+        struct file *f = curproc->p_fd_table[fd];
         if (f && f->f_vn) {
             mapped_vn = f->f_vn;
             vref(mapped_vn);
@@ -188,159 +285,25 @@ int64_t sys_mmap(uintptr_t addr, size_t length, int prot, int flags, int fd, int
         spin_unlock_irqrestore(&curproc->p_lock, proc_flags);
     }
 
-    for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-        uint32_t mmu_flags = MMU_FLAGS_USER;
-        if (prot & 0x1) mmu_flags |= MMU_FLAGS_READ; // PROT_READ
-        if (prot & 0x2) mmu_flags |= MMU_FLAGS_WRITE; // PROT_WRITE
-        if (prot & 0x4) mmu_flags |= MMU_FLAGS_EXEC; // PROT_EXEC
-        if (flags & 0x1) mmu_flags |= MMU_FLAGS_SHARED; // MAP_SHARED
+    uint32_t mmu_flags = MMU_FLAGS_USER;
+    if (prot & 0x1) mmu_flags |= MMU_FLAGS_READ;
+    if (prot & 0x2) mmu_flags |= MMU_FLAGS_WRITE;
+    if (prot & 0x4) mmu_flags |= MMU_FLAGS_EXEC;
+    if (flags & 0x1) mmu_flags |= MMU_FLAGS_SHARED;
 
-        if (mapped_vn == NULL) {
-            if (!mmu_map_demand(curproc->p_vm_map, i, mmu_flags)) {
-                if (mapped_vn) vput(mapped_vn);
-                return -ENOMEM;
-            }
-        } else {
-            int64_t file_offset = offset + (i - start);
-            uintptr_t paddr = 0;
-            bool newly_allocated = false;
-            bool use_shared_cache = (flags & 0x1); // MAP_SHARED
+    // VMA 생성
+    int64_t file_offset_val = (int64_t)offset - (int64_t)(addr & (PAGE_SIZE - 1));
+    struct vm_area *vma = vma_alloc(start, end, mmu_flags, mapped_vn, file_offset_val);
+    if (mapped_vn) vput(mapped_vn);
+    if (!vma) return -ENOMEM;
 
-            if (use_shared_cache) {
-                struct vnode *to_put = NULL;
-                uint64_t lock_flags = spin_lock_irqsave(&g_shared_pages_lock);
-                for (int s = 0; s < MAX_SHARED_PAGES; s++) {
-                    if (g_shared_pages[s].vn == mapped_vn && g_shared_pages[s].file_offset == file_offset) {
-                        uintptr_t cached_paddr = g_shared_pages[s].phys_addr;
-                        page_t *pg = phys_to_page(cached_paddr);
-                        if (pg && pg->is_free) {
-                            to_put = g_shared_pages[s].vn;
-                            g_shared_pages[s].vn = NULL;
-                            g_shared_pages[s].file_offset = 0;
-                            g_shared_pages[s].phys_addr = 0;
-                        } else {
-                            paddr = cached_paddr;
-                            break;
-                        }
-                    }
-                }
-                spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
-
-                if (to_put) {
-                    vput(to_put);
-                }
-            }
-
-            if (paddr == 0) {
-                page_t *pg = page_alloc(0);
-                if (!pg) {
-                    return -ENOMEM;
-                }
-                uintptr_t allocated_paddr = page_to_phys(pg);
-                memset(p2v(allocated_paddr), 0, PAGE_SIZE);
-
-                if (!mapped_vn->ops || !mapped_vn->ops->read) {
-                    page_free(pg, 0);
-                    if (mapped_vn) vput(mapped_vn);
-                    return -EBADF;
-                }
-
-                int n = mapped_vn->ops->read(mapped_vn, p2v(allocated_paddr), PAGE_SIZE, file_offset);
-                if (n < 0) {
-                    dprintf("[KERNEL sys_mmap] File read error %d at offset %ld\n", n, file_offset);
-                    page_free(pg, 0);
-                    return -EIO;
-                }
-
-                if (use_shared_cache) {
-                    cleanup_stale_shared_pages_unlocked();
-
-                    uint64_t lock_flags = spin_lock_irqsave(&g_shared_pages_lock);
-                    uintptr_t double_check_paddr = 0;
-                    struct vnode *to_put_dc = NULL;
-                    for (int s = 0; s < MAX_SHARED_PAGES; s++) {
-                        if (g_shared_pages[s].vn == mapped_vn && g_shared_pages[s].file_offset == file_offset) {
-                            uintptr_t cached_paddr = g_shared_pages[s].phys_addr;
-                            page_t *cached_pg = phys_to_page(cached_paddr);
-                            if (cached_pg && cached_pg->is_free) {
-                                to_put_dc = mapped_vn;
-                                g_shared_pages[s].vn = NULL;
-                                g_shared_pages[s].file_offset = 0;
-                                g_shared_pages[s].phys_addr = 0;
-                            } else {
-                                double_check_paddr = cached_paddr;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (double_check_paddr != 0) {
-                        spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
-                        if (to_put_dc) {
-                            vput(to_put_dc);
-                        }
-                        page_free(pg, 0);
-                        paddr = double_check_paddr;
-                    } else {
-                        bool registered = false;
-                        for (int s = 0; s < MAX_SHARED_PAGES; s++) {
-                            if (g_shared_pages[s].vn == NULL) {
-                                g_shared_pages[s].vn = mapped_vn;
-                                vref(mapped_vn);
-                                g_shared_pages[s].file_offset = file_offset;
-                                g_shared_pages[s].phys_addr = allocated_paddr;
-                                registered = true;
-                                break;
-                            }
-                        }
-                        spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
-
-                        if (to_put_dc) {
-                            vput(to_put_dc);
-                        }
-
-                        if (!registered) {
-                            dprintf("[KERNEL sys_mmap] WARNING: Shared pages cache is full!\n");
-                        }
-                        paddr = allocated_paddr;
-                        newly_allocated = true;
-                    }
-                } else {
-                    paddr = allocated_paddr;
-                    newly_allocated = true;
-                }
-            }
-
-            if (!mmu_map_4k(curproc->p_vm_map, i, paddr, mmu_flags)) {
-                if (newly_allocated) {
-                    if (use_shared_cache) {
-                        struct vnode *to_put_err = NULL;
-                        uint64_t lock_flags = spin_lock_irqsave(&g_shared_pages_lock);
-                        for (int s = 0; s < MAX_SHARED_PAGES; s++) {
-                        if (g_shared_pages[s].vn == mapped_vn && g_shared_pages[s].file_offset == file_offset) {
-                                to_put_err = g_shared_pages[s].vn;
-                                g_shared_pages[s].vn = NULL;
-                                g_shared_pages[s].file_offset = 0;
-                                g_shared_pages[s].phys_addr = 0;
-                                break;
-                            }
-                        }
-                        spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
-                        
-                        if (to_put_err) {
-                            vput(to_put_err);
-                        }
-                    }
-                    page_free(phys_to_page(paddr), 0);
-                }
-                return -ENOMEM;
-            }
-        }
+    // VMA 설치
+    uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+    if (map_fixed) {
+        vma_remove_range(&curproc->p_vma_root, &curproc->p_vma_list, start, end);
     }
-
-    if (mapped_vn) {
-        vput(mapped_vn);
-    }
+    vma_insert(&curproc->p_vma_root, &curproc->p_vma_list, vma);
+    spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
 
     return addr;
 }
@@ -354,11 +317,12 @@ int64_t sys_munmap(void *addr, size_t length) {
     uintptr_t end = ALIGN_UP(uaddr + length, PAGE_SIZE);
     page_table_t *map = curproc->p_vm_map;
 
+    uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+    vma_remove_range(&curproc->p_vma_root, &curproc->p_vma_list, start, end);
+    spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
+
     for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-        uintptr_t paddr = mmu_translate(map, i);
-        if (paddr != 0) {
-            mmu_unmap(map, i);
-        }
+        mmu_unmap(map, i);
     }
 
     return 0;
@@ -378,23 +342,34 @@ int64_t sys_brk(uintptr_t brk) {
             return old_brk;
         }
 
-        for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-            if (mmu_translate(curproc->p_vm_map, i) == 0) {
-                if (!mmu_map_demand(curproc->p_vm_map, i, MMU_FLAGS_USER | MMU_FLAGS_WRITE)) {
-                    return old_brk; 
-                }
+        uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+        struct vm_area *heap_vma = vma_find(curproc->p_vma_root, old_brk - 1);
+        if (heap_vma && heap_vma->end == old_brk && heap_vma->vn == NULL) {
+            vma_erase(&curproc->p_vma_root, &curproc->p_vma_list, heap_vma);
+            heap_vma->end = end;
+            vma_insert(&curproc->p_vma_root, &curproc->p_vma_list, heap_vma);
+        } else {
+            struct vm_area *vma = vma_alloc(start, end,
+                MMU_FLAGS_USER | MMU_FLAGS_READ | MMU_FLAGS_WRITE, NULL, 0);
+            if (vma) {
+                vma_insert(&curproc->p_vma_root, &curproc->p_vma_list, vma);
+            } else {
+                spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
+                return old_brk;
             }
         }
+        spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
     } else if (brk < old_brk) {
         uintptr_t start = ALIGN_UP(brk, PAGE_SIZE);
         uintptr_t end = ALIGN_UP(old_brk, PAGE_SIZE);
         page_table_t *map = curproc->p_vm_map;
 
+        uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+        vma_remove_range(&curproc->p_vma_root, &curproc->p_vma_list, start, end);
+        spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
+
         for (uintptr_t i = start; i < end; i += PAGE_SIZE) {
-            uintptr_t paddr = mmu_translate(map, i);
-            if (paddr != 0) {
-                mmu_unmap(map, i);
-            }
+            mmu_unmap(map, i);
         }
     }
 
@@ -463,18 +438,15 @@ int64_t sys_mremap(uintptr_t old_addr, size_t old_size, size_t new_size, int fla
     int64_t orig_offset = 0;
     bool is_shared_file = false;
 
-    if (old_paddr != 0) {
-        uint64_t lock_flags = spin_lock_irqsave(&g_shared_pages_lock);
-        for (int s = 0; s < MAX_SHARED_PAGES; s++) {
-            if (g_shared_pages[s].phys_addr == old_paddr && g_shared_pages[s].vn != NULL) {
-                orig_vn = g_shared_pages[s].vn;
-                orig_offset = g_shared_pages[s].file_offset;
-                is_shared_file = true;
-                break;
-            }
-        }
-        spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
+    // VMA 먼저 시도
+    uint64_t vma_lk = spin_lock_irqsave(&curproc->p_vma_lock);
+    struct vm_area *old_vma = vma_find(curproc->p_vma_root, old_addr);
+    if (old_vma && old_vma->vn && (old_vma->flags & MMU_FLAGS_SHARED)) {
+        orig_vn = old_vma->vn;
+        orig_offset = old_vma->file_offset;
+        is_shared_file = true;
     }
+    spin_unlock_irqrestore(&curproc->p_vma_lock, vma_lk);
 
     bool can_extend_inplace = true;
     for (uintptr_t i = old_addr + aligned_old; i < old_addr + aligned_new; i += PAGE_SIZE) {
@@ -582,10 +554,6 @@ int64_t sys_mremap(uintptr_t old_addr, size_t old_size, size_t new_size, int fla
                     }
                     return -ENOMEM;
                 }
-            } else {
-                if (!mmu_map_demand(curproc->p_vm_map, i, orig_mmu_flags)) {
-                    return -ENOMEM;
-                }
             }
         }
         return old_addr;
@@ -627,12 +595,9 @@ int64_t sys_mremap(uintptr_t old_addr, size_t old_size, size_t new_size, int fla
 
                 if (cached_paddr != 0) {
                     mmu_map_4k(curproc->p_vm_map, new_page_vaddr, cached_paddr, orig_mmu_flags);
-                } else {
-                    mmu_map_demand(curproc->p_vm_map, new_page_vaddr, orig_mmu_flags);
                 }
                 mmu_unmap(curproc->p_vm_map, old_page_vaddr);
             } else {
-                mmu_map_demand(curproc->p_vm_map, new_page_vaddr, orig_mmu_flags);
                 mmu_unmap(curproc->p_vm_map, old_page_vaddr);
             }
         }
@@ -737,10 +702,6 @@ int64_t sys_mremap(uintptr_t old_addr, size_t old_size, size_t new_size, int fla
                     spin_unlock_irqrestore(&g_shared_pages_lock, lock_flags);
                     page_free(phys_to_page(paddr), 0);
                 }
-                return -ENOMEM;
-            }
-        } else {
-            if (!mmu_map_demand(curproc->p_vm_map, new_page_vaddr, orig_mmu_flags)) {
                 return -ENOMEM;
             }
         }

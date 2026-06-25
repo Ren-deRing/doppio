@@ -108,6 +108,16 @@ int64_t sys_futex(uint32_t *uaddr, int op, uint32_t val, const void *timeout, ui
     return -ENOSYS;
 }
 
+int64_t sys_time(int64_t *user_tloc) {
+    uint64_t ns = get_uptime_ns();
+    int64_t sec = ns / 1000000000ULL;
+    if (user_tloc) {
+        if (!is_user_address_range(user_tloc, sizeof(int64_t))) return -EFAULT;
+        if (copy_to_user(user_tloc, &sec, sizeof(int64_t)) < 0) return -EFAULT;
+    }
+    return sec;
+}
+
 int64_t sys_clock_gettime(int clk_id, void *user_tp) {
     (void)clk_id;
     struct { int64_t tv_sec; int64_t tv_nsec; } tp;

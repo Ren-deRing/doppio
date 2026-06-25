@@ -7,6 +7,7 @@
 #include <kernel/mmu.h>
 #include <kernel/fs/file.h>
 #include <kernel/lock.h>
+#include <kernel/vma.h>
 
 #include <uapi/types.h>
 #include <uapi/signal.h>
@@ -118,6 +119,7 @@ struct proc {
     proc_state_t    p_state;
     spinlock_t      p_lock;
     spinlock_t      p_vm_lock;
+    spinlock_t      p_vma_lock;
     uint64_t        p_active_cpus;
 
     char            p_name[16];
@@ -125,6 +127,9 @@ struct proc {
 
     struct file    *p_fd_table[MAX_FILES];
     struct vnode   *p_cwd;
+
+    struct vm_area *p_vma_root;
+    struct list_node p_vma_list;
 
     page_table_t   *p_vm_map;
     uintptr_t       p_entry;

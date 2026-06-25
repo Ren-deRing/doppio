@@ -1,4 +1,3 @@
-#include <uapi/errno.h>
 #include <kernel/printf.h>
 #include <kernel/mmu.h>
 #include <kernel/cpu.h>
@@ -9,11 +8,16 @@
 #include <kernel/lock.h>
 #include <kernel/clock.h>
 #include <kernel/drm.h>
+#include <kernel/socket.h>
 #include <kernel/fs/vfs.h>
 #include <kernel/fs/vnode.h>
-#include <uapi/fcntl.h>
-#include <string.h>
 #include <kernel/fd.h>
+
+#include <uapi/errno.h>
+#include <uapi/fcntl.h>
+
+#include <string.h>
+
 
 #define POLLIN      0x001
 #define POLLPRI     0x002
@@ -25,34 +29,6 @@
 #define EPOLL_CTL_ADD 1
 #define EPOLL_CTL_DEL 2
 #define EPOLL_CTL_MOD 3
-
-enum socket_state {
-    SS_CLOSED,
-    SS_BOUND,
-    SS_LISTENING,
-    SS_CONNECTED,
-    SS_DISCONNECTED
-};
-
-#define UNIX_SOCKET_MAX_BACKLOG 16
-#define UNIX_SOCKET_MAX_PASSED_FDS 8
-#define UNIX_SOCKET_BUF_SIZE 65536
-
-struct unix_socket {
-    enum socket_state state;
-    char path[108];
-    struct unix_socket *peer;
-    spinlock_t lock;
-    struct unix_socket *backlog[UNIX_SOCKET_MAX_BACKLOG];
-    int backlog_head;
-    int backlog_tail;
-    char *buf;
-    uint32_t buf_head;
-    uint32_t buf_tail;
-    struct file *passed_files[UNIX_SOCKET_MAX_PASSED_FDS];
-    int passed_head;
-    int passed_tail;
-};
 
 extern struct vnode_ops unix_socket_ops;
 
@@ -71,7 +47,7 @@ uint32_t check_fd_readiness(int fd, uint32_t events) {
                     revents |= POLLIN;
                 }
             } else if (s->state == SS_CONNECTED) {
-                if (s->buf_head != s->buf_tail || s->passed_head != s->passed_tail) {
+                if (s->buf_head != s->buf_tail) {
                     revents |= POLLIN;
                 }
                 uint32_t next_tail = s->peer ? (s->peer->buf_tail + 1) % UNIX_SOCKET_BUF_SIZE : 0;
@@ -282,6 +258,7 @@ int64_t sys_epoll_wait(int epfd, void *user_events, int maxevents, int timeout) 
     if (!events) return -ENOMEM;
 
     int ready_count = 0;
+    uint64_t deadline = (timeout > 0) ? get_uptime_ns() + (uint64_t)timeout * 1000000 : 0;
     while (1) {
         ready_count = 0;
         spin_lock(&ei->lock);
@@ -306,13 +283,8 @@ int64_t sys_epoll_wait(int epfd, void *user_events, int maxevents, int timeout) 
 
         thread_yield();
 
-        if (timeout > 0) {
-            static int timeout_ticks = 0;
-            timeout_ticks++;
-            if (timeout_ticks > timeout * 10) { 
-                timeout_ticks = 0;
-                break;
-            }
+        if (timeout > 0 && get_uptime_ns() >= deadline) {
+            break;
         }
     }
 
